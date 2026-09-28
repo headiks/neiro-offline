@@ -39,8 +39,8 @@ Qwen2.5-3B быстрее (около 45 с), но на замере дважд�
 
 | Сервер | Что поставить в `.env` |
 |---|---|
-| 4 vCPU, 8 ГБ | по умолчанию; `WORKER_REPLICAS=1` (разбор документов офлайн не нужен) |
-| 8 vCPU, 16 ГБ | `LLM_THREADS=8`, `NEIROMASTER_OFFLINE_CONTEXT_CHARS=2400`, `NEIROMASTER_OFFLINE_ANSWER_TOKENS=300` |
+| 4 vCPU, 8 ГБ | по умолчанию. Процессы сервер считает сам (`backend/sizing.py`): в офлайне — под локальную модель резервируется ~3 ГБ, RQ-воркер один |
+| 8 vCPU, 16 ГБ | `NEIROMASTER_OFFLINE_CONTEXT_CHARS=2400`, `NEIROMASTER_OFFLINE_ANSWER_TOKENS=300` |
 
 Память в офлайне: llm около 2,5 ГБ, embed около 0,3 ГБ, web около 0,5 ГБ, Postgres
 и Redis. Модели обрабатывают по одному запросу за раз: вопросы, заданные одновременно,
@@ -69,8 +69,7 @@ docker compose exec web python scripts/offline_eval.py --n 30    # замер к
 
 ## Переключение в офлайн
 
-1. Добавить в `.env` строку `NEIROMASTER_LLM_MODE=offline` (и `WORKER_REPLICAS=1` на слабом
-   сервере).
+1. Добавить в `.env` строку `NEIROMASTER_LLM_MODE=offline`.
 2. `docker compose --profile offline up -d`.
 3. Отключить доступ наружу.
 
@@ -94,7 +93,7 @@ docker compose exec web python scripts/offline_eval.py --n 30    # замер к
 |---|---|---|
 | `NEIROMASTER_LLM_MODE` | `online` | `offline` — все вызовы модели идут в локальную `llm`, тяжёлые операции запрещены |
 | `LLM_MODEL` | `unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M` | модель с Hugging Face (скачивается один раз в том `models-llm`) |
-| `LLM_THREADS` | `4` | потоки модели, обычно равно числу ядер |
+| `LLM_THREADS` | по числу ядер | потоки модели |
 | `NEIROMASTER_QA_SIM` | `0.84` | порог похожести для готового ответа |
 | `NEIROMASTER_OFFLINE_CONTEXT_CHARS` | `1200` | сколько символов справки получает модель |
 | `NEIROMASTER_OFFLINE_ANSWER_TOKENS` | `150` | длина ответа модели |

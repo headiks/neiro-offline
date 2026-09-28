@@ -21,7 +21,8 @@ router = APIRouter()
 # контуре, где все доступы выдаёт администратор, её выключают: NEIROMASTER_ALLOW_REGISTRATION=0.
 ALLOW_REGISTRATION = os.environ.get("NEIROMASTER_ALLOW_REGISTRATION", "1").lower() not in ("0", "false", "no")
 
-LOGIN_RATE_PER_MIN = int(os.environ.get("NEIROMASTER_LOGIN_RATE", "120"))
+# За заводским NAT вся смена входит с одного адреса: 120 в минуту упирались в утренний пик.
+LOGIN_RATE_PER_MIN = int(os.environ.get("NEIROMASTER_LOGIN_RATE", "600"))
 
 # Пароль длиннее — не пароль, а попытка нагрузить scrypt.
 _PASSWORD = Field(max_length=256)

@@ -9,7 +9,10 @@
 #
 #   caddy        — вход снаружи: HTTPS (80/443) -> web
 #   web          — API и сайт; схема БД и миграции — при старте
-#   worker       — разбор документов и генерация (очередь RQ), масштаб: WORKER_REPLICAS
+#   worker       — разбор документов и генерация (очередь RQ); процессов внутри — по железу
+#
+# Число процессов web/worker и пул БД сервер считает сам по ядрам и памяти (backend/sizing.py);
+# WEB_CONCURRENCY / NEIROMASTER_RQ_WORKERS / NEIROMASTER_DB_POOL в .env — ручная замена.
 #   db-processed — основная БД: всё обработанное + рабочие данные приложения
 #   db-raw       — исходники: оригиналы документов и загруженные штатки
 #   redis        — очередь задач и общий стейт процессов
@@ -35,8 +38,6 @@ x-app: &app
     REDIS_URL: redis://redis:6379/0
     NEIROMASTER_EMBED_URL: http://embed:8080
     NEIROMASTER_LOCAL_LLM_URL: http://llm:8080
-    WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
-    NEIROMASTER_DB_POOL: ${NEIROMASTER_DB_POOL:-15}
   volumes:
     - documents:/app/data/documents          # локальный кэш оригиналов (источник правды — db-raw)
     - converted:/app/data/converted
@@ -70,7 +71,7 @@ services:
       - secrets:/app/data/secrets
       - models:/app/.cache                   # модели docling/EasyOCR — скачиваются один раз
     deploy:
-      replicas: ${WORKER_REPLICAS:-2}
+      replicas: ${WORKER_REPLICAS:-1}      # процессов внутри — по железу (sizing.py)
     depends_on:
       # web создаёт схему БД под замком — worker стартует после него, без гонки миграций.
       web: {condition: service_healthy}
@@ -83,7 +84,7 @@ services:
     environment:
       LLAMA_CACHE: /models
     command: ["-hf", "ggml-org/bge-m3-Q8_0-GGUF", "--embeddings", "-c", "2048", "-ub", "2048",
-              "--host", "0.0.0.0", "--port", "8080", "-t", "${EMBED_THREADS:-2}"]
+              "--host", "0.0.0.0", "--port", "8080", "-t", "${EMBED_THREADS:--1}"]   # -1 — по числу ядер
     volumes: [models-llm:/models]
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
@@ -106,7 +107,7 @@ services:
     environment:
       LLAMA_CACHE: /models
     command: ["-hf", "${LLM_MODEL:-unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M}", "-c", "4096",
-              "--parallel", "1", "-t", "${LLM_THREADS:-4}", "--host", "0.0.0.0", "--port", "8080"]
+              "--parallel", "1", "-t", "${LLM_THREADS:--1}", "--host", "0.0.0.0", "--port", "8080"]
     volumes: [models-llm:/models]
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
@@ -145,7 +146,7 @@ services:
       POSTGRES_USER: neiromaster
       POSTGRES_PASSWORD: ${POSTGRES_PROCESSED_PASSWORD:-neiromaster}
       POSTGRES_DB: neiromaster
-    # web (WEB_CONCURRENCY * пул) + worker'ы (WORKER_REPLICAS * пул) — с запасом.
+    # (web + RQ-процессы) * пул; пул sizing.py делит 80% этого числа на процессы.
     command: ["postgres", "-c", "max_connections=300"]
     volumes: [pg-processed:/var/lib/postgresql/data]
     healthcheck:

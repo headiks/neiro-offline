@@ -43,3 +43,13 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn(); print("OK ", name)
     print("test_push: все проверки пройдены")
+
+
+def test_notify_sends_in_parallel():
+    import time
+    sys.modules["db"].query = lambda *a, **k: [{"user_id": f"u{i}", "token": f"t{i}"} for i in range(40)]
+    push._send_one = lambda *a: (time.sleep(0.1), "ok")[1]
+    t = time.time()
+    assert push.notify([{"user_id": f"u{i}", "title": "T", "body": "B"} for i in range(40)]) == 40
+    assert time.time() - t < 1.0          # по одному было бы 4 с
+    sys.modules["db"].query = lambda *a, **k: [{"user_id": "u1", "token": "fcm-AAA"}]
