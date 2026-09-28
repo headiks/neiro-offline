@@ -9,6 +9,7 @@ data/owner_initial_credentials.txt
 data/documents/
 data/converted/
 data/processed/
+data/app/
 data/*.json
 !data/knowledge_seed.json
 !data/stage_catalog.json
@@ -29,7 +30,8 @@ examples/
 .pytest_cache/
 .venv/
 venv/
-test_*.py
-e2e_test.py
-loadtest.py
-run_tests.py
+tests/
+scripts/loadtest.py
+iphone/
+*.apk
+*.aab

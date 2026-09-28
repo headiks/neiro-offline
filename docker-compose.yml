@@ -36,7 +36,8 @@ x-app: &app
     - documents:/app/data/documents          # локальный кэш оригиналов (источник правды — db-raw)
     - converted:/app/data/converted
     - parse-cache:/app/data/processed
-    - secrets:/app/data/secrets              # ключ ПДн: бэкапить ОТДЕЛЬНО от дампов БД
+    - secrets:/app/data/secrets              # ключ ПДн, ключ Firebase: бэкапить ОТДЕЛЬНО от дампов БД
+    - app-files:/app/data/app                # APK приложения для страницы /app
   restart: unless-stopped
   security_opt: ["no-new-privileges:true"]
   logging: *logging
@@ -150,6 +151,7 @@ volumes:
   converted:
   parse-cache:
   secrets:
+  app-files:
   models:
   caddy-data:
   caddy-config:

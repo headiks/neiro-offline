@@ -8,7 +8,7 @@ import getpass
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend"))
+import _path  # noqa: F401,E402 — backend/ в sys.path
 os.environ.setdefault("NEIROMASTER_PII_KEY", "off")
 import users  # noqa: E402
 

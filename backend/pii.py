@@ -27,7 +27,7 @@ import os
 import re
 from pathlib import Path
 
-_NAME_DIR = Path(__file__).resolve().parent / "data" / "name_dict"
+_NAME_DIR = Path(__file__).resolve().parents[1] / "data" / "name_dict"
 _NAME_SET = None
 
 

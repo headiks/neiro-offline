@@ -21,7 +21,7 @@ import auth
 import users
 import indexing
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]   # корень проекта (код — в backend/)
 STATIC_DIR = BASE_DIR / "static"
 
 

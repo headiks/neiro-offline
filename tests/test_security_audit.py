@@ -19,7 +19,7 @@ import types
 import importlib
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[1]   # корень проекта
 
 
 # --------------------------------------------------------------------------
@@ -146,7 +146,7 @@ def test_session_cookie_is_secure():
     # установка куки живёт в deps.py (веб-слой), но ищем по всем модулям — чтобы
     # тест не отваливался при переносе кода между файлами.
     block = ""
-    for path in sorted(BASE.glob("*.py")):
+    for path in sorted((BASE / "backend").glob("*.py")):
         src = path.read_text(encoding="utf-8")
         start = src.find("def _set_session_cookie")
         if start >= 0:

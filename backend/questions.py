@@ -25,7 +25,7 @@ from typing import Optional
 import db
 import users
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]   # корень проекта (код — в backend/)
 DATA_DIR = BASE_DIR / "data"
 QUESTIONS_PATH = DATA_DIR / "pending_questions.json"
 

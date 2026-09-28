@@ -22,7 +22,7 @@ import os
 import threading
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]   # корень проекта (код — в backend/)
 DEFAULT_KEY_FILE = BASE_DIR / "data" / "secrets" / "pii.key"
 _FP_SETTING = "pii_key_fingerprint"
 _DISABLED = ("off", "0", "false", "no", "disabled")

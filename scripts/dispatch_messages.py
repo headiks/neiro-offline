@@ -8,6 +8,7 @@
     python dispatch_messages.py            # один проход
     */1 * * * *  cd /app && python dispatch_messages.py   # пример строки crontab
 """
+import _path  # noqa: F401,E402 — backend/ в sys.path
 import messaging
 
 if __name__ == "__main__":

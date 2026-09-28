@@ -23,6 +23,7 @@ RUN npm run build --prefix frontend
 FROM python:${PYTHON_VERSION}-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/backend \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120
@@ -41,12 +42,13 @@ RUN pip install -r requirements-web.txt
 FROM base AS web
 COPY --chown=app:app . .
 COPY --from=frontend --chown=app:app /src/static/app static/app
-RUN mkdir -p data/documents data/converted data/processed data/secrets \
+RUN mkdir -p data/documents data/converted data/processed data/secrets data/app \
  && chown -R app:app data
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"
+# Код — в backend/ (PYTHONPATH), рабочая папка — корень: data/ и static/ от неё.
 # Число процессов — WEB_CONCURRENCY (gunicorn читает сам). Порт web снаружи не публикуется —
 # перед ним Caddy, поэтому заголовкам X-Forwarded-* из внутренней сети доверяем.
 CMD ["gunicorn", "app:app", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", \
@@ -70,4 +72,4 @@ ENV HF_HOME=/app/.cache/huggingface \
 RUN mkdir -p data/documents data/converted data/processed data/secrets .cache \
  && chown -R app:app data .cache
 USER app
-CMD ["python", "worker.py"]
+CMD ["python", "backend/worker.py"]

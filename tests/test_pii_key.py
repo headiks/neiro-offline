@@ -13,7 +13,7 @@ from cryptography.fernet import Fernet
 
 import pii_key
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[1] / "backend"   # модули приложения
 
 
 @pytest.fixture

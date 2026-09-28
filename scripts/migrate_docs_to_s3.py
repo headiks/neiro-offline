@@ -8,6 +8,7 @@
 
 Требует заданных NEIROMASTER_S3_ENDPOINT / _BUCKET / _KEY / _SECRET (см. config.py).
 """
+import _path  # noqa: F401,E402 — backend/ в sys.path
 import sys
 
 import config

@@ -24,8 +24,11 @@ import db
 
 _TIMEOUT = 15
 _SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
-BASE_DIR = Path(__file__).resolve().parent
-_SA_DEFAULT = BASE_DIR / "secrets" / "fcm-service-account.json"
+BASE_DIR = Path(__file__).resolve().parents[1]   # корень проекта (код — в backend/)
+# Docker: том секретов data/secrets/; установка без Docker — secrets/ в корне.
+_SA_DEFAULT = next((p for p in (BASE_DIR / "data" / "secrets" / "fcm-service-account.json",
+                                BASE_DIR / "secrets" / "fcm-service-account.json") if p.exists()),
+                   BASE_DIR / "data" / "secrets" / "fcm-service-account.json")
 
 _sa_cache = None   # (google credentials, project_id) — ленивое, кэшируется
 

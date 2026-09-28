@@ -22,6 +22,7 @@
     python seed_roles_demo.py --purge    # убрать тестовые роли и их документы
 """
 
+import _path  # noqa: F401,E402 — backend/ в sys.path
 import sys
 import secrets
 

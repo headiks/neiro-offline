@@ -34,7 +34,7 @@ from typing import Optional
 import db
 import pii_key
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]   # корень проекта (код — в backend/)
 DATA_DIR = BASE_DIR / "data"
 USERS_PATH = DATA_DIR / "users.json"          # старое хранилище — источник разовой миграции
 LEGACY_EMPLOYEES_PATH = DATA_DIR / "employees.json"

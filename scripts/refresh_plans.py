@@ -11,6 +11,7 @@
     source .venv/bin/activate
     python refresh_plans.py
 """
+import _path  # noqa: F401,E402 — backend/ в sys.path
 # ВАЖНО: config импортируется ПЕРВЫМ — при импорте он читает .env.production/.env в
 # окружение. Иначе db.py (импортируется из planner) зафиксирует DSN по умолчанию
 # (neiromaster:neiromaster) ещё до загрузки секретов и упрётся в ошибку пароля.

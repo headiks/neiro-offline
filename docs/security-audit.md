@@ -62,7 +62,7 @@
 ## Как проверить
 
 ```bash
-python run_tests.py                      # все юнит- и интеграционные тесты (136)
+python tests/run_tests.py                      # все юнит- и интеграционные тесты (136)
 python -m pytest -q test_api_integration.py   # только сценарии безопасности и прав
 E2E_BASE=http://127.0.0.1:8000 python e2e_test.py   # браузер: админка, тур, кабинет на телефоне
 ```

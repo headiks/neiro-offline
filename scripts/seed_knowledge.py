@@ -12,12 +12,13 @@ data/knowledge_seed.json. То же, что делает приложение п
 ошибке они соберутся при первом изменении папки в админке или при рестарте.
 """
 
+import _path  # noqa: F401,E402 — backend/ в sys.path
 import os
 import sys
 import json
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[1]   # корень проекта
 
 
 def _load_env():

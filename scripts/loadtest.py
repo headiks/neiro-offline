@@ -8,6 +8,7 @@
 Печатает долю ошибок и задержки p50/p95/max. /ask ходит в DeepSeek (или в кэш частых
 вопросов) — его гоняйте малым N и с прогретым кэшем, иначе тест упрётся в лимиты тарифа.
 """
+import _path  # noqa: F401,E402 — backend/ в sys.path
 import argparse
 import json
 import statistics

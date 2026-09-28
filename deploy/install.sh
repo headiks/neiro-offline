@@ -10,7 +10,7 @@
 # классификацию документов, поиск и генерацию делает DeepSeek через docpipe
 # (LLM-метки этапов/подэтапов в Postgres).
 #
-# Запускать из корня распакованного проекта (там, где лежит app.py):
+# Запускать из корня распакованного проекта (там, где лежат backend/ и data/):
 #   chmod +x install.sh && ./install.sh
 #
 # Работает и от root, и от обычного пользователя с sudo.
@@ -119,6 +119,7 @@ EnvironmentFile=$ENV_FILE
 # -b 127.0.0.1: снаружи сайт доступен только через HTTPS-прокси (кука сессии Secure).
 # --forwarded-allow-ips: прокси на этом же хосте — доверяем его X-Forwarded-For (реальный IP
 # клиента нужен лимитам входа и журналу действий).
+Environment=PYTHONPATH=$APP_DIR/backend
 ExecStart=$APP_DIR/.venv/bin/gunicorn app:app \\
     -k uvicorn.workers.UvicornWorker \\
     -b $BIND --timeout 120 --graceful-timeout 30 --forwarded-allow-ips=127.0.0.1
@@ -140,7 +141,8 @@ Requires=docker.service
 [Service]
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$ENV_FILE
-ExecStart=$APP_DIR/.venv/bin/python $APP_DIR/worker.py
+Environment=PYTHONPATH=$APP_DIR/backend
+ExecStart=$APP_DIR/.venv/bin/python $APP_DIR/backend/worker.py
 Restart=on-failure
 User=$APP_USER
 

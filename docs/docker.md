@@ -98,4 +98,4 @@ docker compose up -d
    `docker compose exec -T db-processed pg_restore -U neiromaster -d neiromaster --clean < old.dump`
 2. Ключ ПДн → в том секретов: `docker compose cp data/secrets/pii.key web:/app/data/secrets/pii.key`
 3. Оригиналы документов → в `db-raw`: скопировать `data/documents/` в контейнер и выполнить
-   `docker compose exec web python rawdb.py --backfill` (идемпотентно; берёт и из S3, если он настроен).
+   `docker compose exec web python backend/rawdb.py --backfill` (идемпотентно; берёт и из S3, если он настроен).

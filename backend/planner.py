@@ -39,7 +39,7 @@ from psycopg.types.json import Json
 
 import db
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]   # корень проекта (код — в backend/)
 DATA_DIR = BASE_DIR / "data"
 CATALOG_PATH = DATA_DIR / "stage_catalog.json"
 PLANS_DIR = DATA_DIR / "plans"

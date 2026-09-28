@@ -45,7 +45,7 @@ def test_stage_substages_normalize():
 
 
 def test_seed_integrity():
-    seed = json.loads((pathlib.Path(__file__).parent / "data" / "knowledge_seed.json")
+    seed = json.loads((pathlib.Path(__file__).resolve().parents[1] / "data" / "knowledge_seed.json")
                       .read_text(encoding="utf-8"))
     assert len(seed["stages"]) == 8       # блоки из «Блоки и модули»
     assert len(seed["folders"]) == 125    # документы из «Сортировка документов»

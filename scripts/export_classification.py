@@ -19,6 +19,7 @@
 Результат:          Классификация_документов.xlsx
 """
 
+import _path  # noqa: F401,E402 — backend/ в sys.path
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter

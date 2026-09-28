@@ -6,7 +6,7 @@
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]   # корень проекта (код — в backend/)
 DATA_DIR = BASE_DIR / "data"
 
 # Локальная загрузка .env (без зависимостей): построчно KEY=VALUE. НЕ перетирает уже

@@ -47,7 +47,7 @@ except Exception as _e:              # noqa: BLE001 — любая причин�
 
 pytestmark = pytest.mark.skipif(not DB_OK, reason="тестовая PostgreSQL недоступна")
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[1]   # корень проекта
 ORIGIN = {"Origin": "http://testserver"}
 
 
