@@ -122,7 +122,7 @@ EnvironmentFile=$ENV_FILE
 Environment=PYTHONPATH=$APP_DIR/backend
 ExecStart=$APP_DIR/.venv/bin/gunicorn app:app \\
     -k uvicorn.workers.UvicornWorker \\
-    -b $BIND --timeout 120 --graceful-timeout 30 --forwarded-allow-ips=127.0.0.1
+    -b $BIND --timeout 120 --graceful-timeout 30 --keep-alive 150 --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 User=$APP_USER
 
@@ -142,7 +142,7 @@ Requires=docker.service
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$ENV_FILE
 Environment=PYTHONPATH=$APP_DIR/backend
-ExecStart=$APP_DIR/.venv/bin/python $APP_DIR/backend/worker.py
+ExecStart=$APP_DIR/.venv/bin/python $APP_DIR/backend/worker.py --one
 Restart=on-failure
 User=$APP_USER
 

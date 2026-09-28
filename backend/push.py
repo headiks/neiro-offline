@@ -10,12 +10,14 @@ Push-уведомления на устройства сотрудников ч�
 Отправка — best-effort: сбой сети/FCM НЕ должен ронять доставку в инбокс (инбокс —
 источник правды, пуш лишь дублирует). Протухшие токены (UNREGISTERED) чистим.
 
-ponytail: шлём по одному сообщению на токен (FCM v1 без batch-эндпоинта) прямым
-вызовом из планировщика; объёмы малы. Понадобится масштаб — вынести в RQ-задачу.
+FCM v1 без batch-эндпоинта: одно сообщение на токен, но параллельно (NEIROMASTER_PUSH_WORKERS,
+по умолчанию 20). Стресс-тест: по одному — 66 мс на пуш, 1000 сотрудников ~66 с.
 """
 
 import os
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
@@ -31,6 +33,8 @@ _SA_DEFAULT = next((p for p in (BASE_DIR / "data" / "secrets" / "fcm-service-acc
                    BASE_DIR / "data" / "secrets" / "fcm-service-account.json")
 
 _sa_cache = None   # (google credentials, project_id) — ленивое, кэшируется
+_sa_lock = threading.Lock()   # параллельные отправки не должны обновлять токен наперегонки
+_WORKERS = int(os.environ.get("NEIROMASTER_PUSH_WORKERS", "20"))
 
 
 # ---------- Хранилище токенов ----------
@@ -78,18 +82,19 @@ def _access_token():
     """OAuth2-токен доступа и project_id из service-account. Кэшируем creds; google-auth
     сам обновляет протухший токен. Бросает при отсутствии/битом ключе (ловит вызвавший)."""
     global _sa_cache
-    if _sa_cache is None:
-        path = os.environ.get("FCM_SERVICE_ACCOUNT") or str(_SA_DEFAULT)
-        from google.oauth2 import service_account
-        creds = service_account.Credentials.from_service_account_file(path, scopes=[_SCOPE])
-        with open(path, "r", encoding="utf-8") as f:
-            pid = json.load(f).get("project_id")
-        _sa_cache = (creds, pid)
-    creds, pid = _sa_cache
-    if not creds.valid:
-        from google.auth.transport.requests import Request
-        creds.refresh(Request())
-    return creds.token, pid
+    with _sa_lock:
+        if _sa_cache is None:
+            path = os.environ.get("FCM_SERVICE_ACCOUNT") or str(_SA_DEFAULT)
+            from google.oauth2 import service_account
+            creds = service_account.Credentials.from_service_account_file(path, scopes=[_SCOPE])
+            with open(path, "r", encoding="utf-8") as f:
+                pid = json.load(f).get("project_id")
+            _sa_cache = (creds, pid)
+        creds, pid = _sa_cache
+        if not creds.valid:
+            from google.auth.transport.requests import Request
+            creds.refresh(Request())
+        return creds.token, pid
 
 
 def _send_one(token: str, title: str, body: str, data: dict) -> str:
@@ -136,15 +141,13 @@ def notify(items: list) -> int:
     by_user = tokens_for_users([it.get("user_id") for it in items])
     if not by_user:
         return 0
-    ok = 0
-    for it in items:
-        title = (it.get("title") or "НейроМастер")[:120]
-        body = (it.get("body") or "")[:1000]
-        data = it.get("data") or {}
-        for tok in by_user.get(it.get("user_id"), []):
-            res = _send_one(tok, title, body, data)
-            if res == "ok":
-                ok += 1
-            elif res == "unregistered":
-                remove_token(tok)
-    return ok
+    jobs = [(tok, (it.get("title") or "НейроМастер")[:120], (it.get("body") or "")[:1000],
+             it.get("data") or {}) for it in items for tok in by_user.get(it.get("user_id"), [])]
+    if not jobs:
+        return 0
+    with ThreadPoolExecutor(max_workers=max(1, min(_WORKERS, len(jobs)))) as ex:
+        results = list(ex.map(lambda j: _send_one(*j), jobs))
+    for (tok, *_), res in zip(jobs, results):
+        if res == "unregistered":
+            remove_token(tok)
+    return results.count("ok")

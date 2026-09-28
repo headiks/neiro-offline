@@ -54,6 +54,27 @@ def main():
 
     _requeue_once(r)
 
+    # Сколько RQ-воркеров — по железу (sizing.py), NEIROMASTER_RQ_WORKERS — ручная замена.
+    # Процессы запускаются с нуля (spawn): соединения Redis/БД после fork делить нельзя.
+    # Упал любой — выходим с ошибкой, Docker перезапускает контейнер целиком.
+    import sizing
+    import sys
+    # --one: число процессов задаёт внешний запуск (systemd rag-worker@N в install.sh).
+    n = 1 if "--one" in sys.argv else sizing.rq_workers()
+    print(f"[sizing] {sizing.summary()}")
+    if n > 1:
+        import multiprocessing as mp
+        ctx = mp.get_context("spawn")
+        procs = [ctx.Process(target=_work, daemon=True) for _ in range(n)]
+        for p in procs:
+            p.start()
+        while all(p.is_alive() for p in procs):
+            procs[0].join(5)
+        raise SystemExit(f"[worker] RQ-воркер завершился (коды {[p.exitcode for p in procs]}) — перезапуск")
+    _work()
+
+
+def _work():
     from rq import Queue, SimpleWorker
     rq_conn = get_redis_raw()   # RQ хранит pickled-данные — клиент без decode_responses
     q = Queue(QUEUE_NAME, connection=rq_conn)

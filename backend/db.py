@@ -34,7 +34,8 @@ DSN = (
 # Верхняя граница пула. Для многих пользователей упирается не в число людей, а в
 # число одновременных запросов; при нескольких воркерах учитывайте суммарный лимит
 # max_connections у Postgres. Настраивается переменной NEIROMASTER_DB_POOL.
-POOL_MAX = int(os.environ.get("NEIROMASTER_DB_POOL", "10"))
+import sizing  # noqa: E402 — по железу; NEIROMASTER_DB_POOL в окружении главнее
+POOL_MAX = sizing.db_pool()
 
 _pool: ConnectionPool | None = None
 _pool_lock = threading.Lock()

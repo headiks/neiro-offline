@@ -49,10 +49,9 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"
 # Код — в backend/ (PYTHONPATH), рабочая папка — корень: data/ и static/ от неё.
-# Число процессов — WEB_CONCURRENCY (gunicorn читает сам). Порт web снаружи не публикуется —
-# перед ним Caddy, поэтому заголовкам X-Forwarded-* из внутренней сети доверяем.
-CMD ["gunicorn", "app:app", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", \
-     "--timeout", "120", "--graceful-timeout", "30", "--forwarded-allow-ips", "*"]
+# Процессы, порт, таймауты, keep-alive — в gunicorn.conf.py (gunicorn читает сам);
+# число процессов считается по железу (backend/sizing.py).
+CMD ["gunicorn", "app:app"]
 
 
 # ---------- worker ----------
