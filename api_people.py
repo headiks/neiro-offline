@@ -15,7 +15,7 @@ import messaging
 import activitylog
 import rawdb
 from config import MAX_UPLOAD_BYTES
-from deps import require_admin, require_owner, admin_only, owner_only
+from deps import require_admin, require_owner, admin_only, owner_only, globaltest_only
 
 router = APIRouter()
 
@@ -393,7 +393,7 @@ class NotifyTestRequest(BaseModel):
     messages: list[TestMessage] = Field(default_factory=list, max_length=50)
 
 
-@router.post("/users/{user_id}/notify-test", dependencies=admin_only)
+@router.post("/users/{user_id}/notify-test", dependencies=globaltest_only)
 def notify_test(user_id: str, req: NotifyTestRequest, actor: dict = Depends(require_admin)):
     """Тестировщик уведомлений: кладёт несколько сообщений в инбокс выбранного
     пользователя. Он увидит их очередью на своей странице (кабинет/админка)."""
@@ -414,13 +414,13 @@ class TestTypedMessages(BaseModel):
     messages: list[dict] | None = Field(default=None, max_length=50)   # None — по примеру каждого типа
 
 
-@router.get("/test-messages/samples", dependencies=admin_only)
+@router.get("/test-messages/samples", dependencies=globaltest_only)
 def test_message_samples():
     """Примеры тестовых сообщений всех типов — заготовка для редактора на странице /message-test."""
     return {"messages": messaging.test_samples()}
 
 
-@router.post("/users/{user_id}/test-messages", dependencies=admin_only)
+@router.post("/users/{user_id}/test-messages", dependencies=globaltest_only)
 def send_test_messages(user_id: str, req: TestTypedMessages, actor: dict = Depends(require_admin)):
     """Тестовые сообщения выбранному пользователю: тип, заголовок, текст, пункты чек-листа,
     вопросы опроса/теста и задержку задаёт администратор. Приходят в инбокс и пушем."""

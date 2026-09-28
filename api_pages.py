@@ -11,19 +11,26 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel, Field
 
+import activitylog
 import auth
+import security
 import users
-from deps import BASE_DIR, STATIC_DIR, page_for_admin, spa_html
+from deps import (BASE_DIR, STATIC_DIR, GT_COOKIE, GT_TTL, gt_check_password, gt_configured, gt_token,
+                  gt_unlocked, page_for_admin, page_for_globaltest, require_admin, spa_html)
 
 router = APIRouter()
 
 # Разделы админки (/admin/<раздел>) и служебные страницы — все внутри SPA.
 ADMIN_SECTIONS = ("users", "plans", "documents", "messages", "questions")
-SERVICE_PAGES = ("/s3", "/documents-board", "/documents-table", "/logs", "/plans-db", "/notify-test",
-                 "/doc-breakdown", "/queue-test", "/globaltest", "/message-test")
+# Журнал действий — рабочий инструмент администратора. Тесты и диагностика — только через
+# /globaltest с отдельным паролем (deps.page_for_globaltest).
+SERVICE_PAGES = ("/logs", "/globaltest")
+TEST_PAGES = ("/s3", "/documents-board", "/documents-table", "/plans-db", "/notify-test",
+              "/doc-breakdown", "/queue-test", "/message-test")
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -78,8 +85,49 @@ def _service_page(path: str):
     router.add_api_route(path, page, methods=["GET"], response_class=HTMLResponse)
 
 
+def _test_page(path: str):
+    def page(request: Request):
+        return page_for_globaltest(request)
+    page.__name__ = "page_" + path.strip("/").replace("-", "_")
+    router.add_api_route(path, page, methods=["GET"], response_class=HTMLResponse)
+
+
 for _path in SERVICE_PAGES:
     _service_page(_path)
+for _path in TEST_PAGES:
+    _test_page(_path)
+
+
+class GlobaltestUnlock(BaseModel):
+    password: str = Field(max_length=200)
+
+
+@router.get("/api/globaltest")
+def globaltest_status(request: Request, user: dict = Depends(require_admin)):
+    return {"configured": gt_configured(), "unlocked": gt_unlocked(request, user)}
+
+
+@router.post("/api/globaltest/unlock")
+def globaltest_unlock(req: GlobaltestUnlock, request: Request, user: dict = Depends(require_admin)):
+    """Открыть раздел тестирования паролем. Перебор ограничен: 5 попыток в 5 минут."""
+    security.limit(request, "globaltest", 5, 300, key=user["id"])
+    ok = gt_check_password(req.password)
+    activitylog.log("action", user=user, request=request,
+                    detail={"action": "globaltest_unlock", "ok": ok})
+    if not ok:
+        raise HTTPException(status_code=403, detail="Неверный пароль" if gt_configured()
+                            else "Пароль раздела не настроен на сервере")
+    resp = JSONResponse({"unlocked": True})
+    resp.set_cookie(GT_COOKIE, gt_token(user["id"]), max_age=GT_TTL, httponly=True,
+                    samesite="strict", secure=auth.COOKIE_SECURE, path="/")
+    return resp
+
+
+@router.post("/api/globaltest/lock")
+def globaltest_lock(user: dict = Depends(require_admin)):
+    resp = JSONResponse({"unlocked": False})
+    resp.delete_cookie(GT_COOKIE, path="/")
+    return resp
 
 
 @router.get("/favicon.ico", include_in_schema=False)

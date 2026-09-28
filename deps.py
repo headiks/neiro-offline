@@ -7,7 +7,11 @@ require_owner) и правила разграничения между адми�
 видит только своё» пришлось бы поддерживать в нескольких местах.
 """
 
+import hmac
+import hashlib
+import os
 import threading
+import time
 from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request, Response
@@ -122,6 +126,69 @@ def ensure_doc_access(user: dict, filename: str, write: bool = False):
     if write and not users.can_edit_doc(user, doc):
         raise HTTPException(status_code=403,
                             detail="Общий документ суперадмина: менять и удалять его может только суперадмин")
+
+
+# ---------- /globaltest: тесты и диагностика под отдельным паролем ----------
+# Пароль хранится только хешем (scrypt, как у пользователей) в env:
+#   NEIROMASTER_GLOBALTEST_PASSWORD_HASH=<salt_hex>:<hash_hex>
+# Получить: python scripts/globaltest_hash.py. Не задан — раздел закрыт для всех.
+# После ввода пароля — подписанная кука на GT_TTL (ключ HMAC — сам хеш: сменили пароль —
+# все выданные доступы недействительны). Нужен ещё и вход администратора.
+GT_COOKIE = "nm_gt"
+GT_TTL = 12 * 3600
+
+
+def _gt_hash() -> str:
+    return os.environ.get("NEIROMASTER_GLOBALTEST_PASSWORD_HASH", "").strip()
+
+
+def gt_configured() -> bool:
+    return ":" in _gt_hash()
+
+
+def gt_check_password(password: str) -> bool:
+    if not gt_configured():
+        return False
+    salt, digest = _gt_hash().split(":", 1)
+    return users.verify_password(password or "", salt, digest)
+
+
+def _gt_sign(user_id: str, exp: int) -> str:
+    return hmac.new(_gt_hash().encode(), f"{user_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+
+
+def gt_token(user_id: str, now: float | None = None) -> str:
+    exp = int(now or time.time()) + GT_TTL
+    return f"{exp}.{_gt_sign(user_id, exp)}"
+
+
+def gt_unlocked(request: Request, user: dict | None) -> bool:
+    raw = request.cookies.get(GT_COOKIE) or ""
+    exp, _, sig = raw.partition(".")
+    if not (user and gt_configured() and exp.isdigit() and int(exp) > time.time()):
+        return False
+    return hmac.compare_digest(sig, _gt_sign(user["id"], int(exp)))
+
+
+def require_globaltest(request: Request, user: dict = Depends(require_admin)) -> dict:
+    """API тестовых страниц: администратор + открытый паролем раздел /globaltest."""
+    if not gt_unlocked(request, user):
+        raise HTTPException(status_code=403, detail="Раздел тестирования закрыт — откройте /globaltest")
+    return user
+
+
+globaltest_only = [Depends(require_globaltest)]
+
+
+def page_for_globaltest(request: Request):
+    """Тестовая страница: как админская, но без открытого паролем раздела — на /globaltest."""
+    page = page_for_admin(request)
+    if isinstance(page, RedirectResponse):
+        return page
+    user = auth.get_session_user(request.cookies.get(auth.COOKIE_NAME))
+    if not gt_unlocked(request, user):
+        return RedirectResponse(url="/globaltest", status_code=303)
+    return page
 
 
 def page_for_admin(request: Request):

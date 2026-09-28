@@ -3,8 +3,7 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  Activity, CalendarRange, ClipboardList, Database, FileText, FlaskConical, GraduationCap, House, KeyRound, LogOut,
-  MessageCircleQuestion, MessagesSquare, Moon, Send, Settings, Smartphone, Sun, Users,
+  CalendarRange, ClipboardList, Database, GraduationCap, House, KeyRound, LogOut, MessageCircleQuestion, MessagesSquare, Moon, Settings, Smartphone, Sun, Users,
 } from 'lucide-react';
 import { initials } from '@shared/format';
 import { ROLE } from '@shared/status';
@@ -41,7 +40,7 @@ function useOpenQuestions(enabled: boolean) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { me, isAdmin, isOwner } = useMe();
+  const { me, isAdmin } = useMe();
   const { unread } = useInbox();
   const { dark, toggle } = useThemeMode();
   const openQuestions = useOpenQuestions(isAdmin);
@@ -87,10 +86,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               { label: 'Сменить пароль', icon: KeyRound, onClick: () => setPwOpen(true), hidden: !isAdmin },
               { section: 'Служебное', hidden: !isAdmin },
               { label: 'Журнал действий', icon: ClipboardList, href: '/logs', hidden: !isAdmin },
-              { label: 'База планов', icon: FileText, href: '/plans-db', hidden: !isOwner },
-              { label: 'Тест уведомлений', icon: Send, href: '/notify-test', hidden: !isOwner },
-              { label: 'Очереди', icon: Activity, href: '/queue-test', hidden: !isOwner },
-              { label: 'Диагностика', icon: FlaskConical, href: '/globaltest', hidden: !isOwner },
             ]} trigger={(p) => <Button variant="ghost" iconOnly size="sm" icon={Settings} aria-label="Настройки" title="Настройки" data-tour="profile-menu" {...p} />} />
             <Button variant="ghost" iconOnly size="sm" icon={LogOut} aria-label="Выйти" title="Выйти" onClick={logout} />
           </div>

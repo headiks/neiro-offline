@@ -7,12 +7,12 @@
 """
 from fastapi import APIRouter, HTTPException
 
-from deps import owner_only
+from deps import globaltest_only, owner_only
 from redis_conn import get_redis_raw
 import jobs
 import ratelimit
 
-router = APIRouter(prefix="/api/queue", dependencies=owner_only)
+router = APIRouter(prefix="/api/queue", dependencies=[*owner_only, *globaltest_only])   # тест очередей — за /globaltest
 
 
 def _queue_or_400():

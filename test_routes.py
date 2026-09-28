@@ -100,7 +100,7 @@ def test_every_private_route_requires_login():
                           ("require_admin", "require_owner", "require_setup_done", "current_user"))
         if not guarded:
             # страницы отдают редирект на /login внутри обработчика
-            guarded = "page_for_admin" in (inspect.getsource(endpoint) or "")
+            guarded = any(g in (inspect.getsource(endpoint) or "") for g in ("page_for_admin", "page_for_globaltest"))
         if not guarded:
             unguarded.append(f"{sorted(r.methods or [])} {r.path}")
     assert not unguarded, f"маршруты без проверки доступа: {unguarded}"
@@ -133,7 +133,7 @@ def test_admin_pages_are_admin_only():
     for r in routes(load_app()):
         if r.path in ("/admin", "/admin/{section}", "/s3", "/documents-board", "/documents-table", "/doc-breakdown",
                       "/logs", "/plans-db", "/notify-test", "/queue-test", "/globaltest", "/message-test"):
-            assert "page_for_admin" in inspect.getsource(r.endpoint), \
+            assert any(g in inspect.getsource(r.endpoint) for g in ("page_for_admin", "page_for_globaltest")), \
                 f"страница {r.path} не закрыта page_for_admin"
 
 

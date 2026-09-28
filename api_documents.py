@@ -14,7 +14,7 @@ import folders
 import users
 import activitylog
 from config import MAX_UPLOAD_BYTES
-from deps import _bg, require_admin, admin_only, owner_only, can_see_doc, visible_documents, ensure_doc_access
+from deps import _bg, require_admin, admin_only, owner_only, globaltest_only, can_see_doc, visible_documents, ensure_doc_access
 
 router = APIRouter()
 
@@ -175,7 +175,7 @@ def upload_document(file: UploadFile = File(...), mode: str = "", confidential: 
     return JSONResponse(status_code=202, content=job)
 
 
-@router.get("/api/s3/list")
+@router.get("/api/s3/list", dependencies=globaltest_only)   # обозреватель S3 — за /globaltest
 def api_s3_list(prefix: str = "", recursive: bool = False,
                 user: dict = Depends(require_admin)):
     """Листинг бакета (метаданные): «папки» + файлы уровня, либо рекурсивно. Хранилище
