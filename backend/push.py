@@ -10,8 +10,10 @@ Push-уведомления на устройства сотрудников ч�
 Отправка — best-effort: сбой сети/FCM НЕ должен ронять доставку в инбокс (инбокс —
 источник правды, пуш лишь дублирует). Протухшие токены (UNREGISTERED) чистим.
 
-FCM v1 без batch-эндпоинта: одно сообщение на токен, но параллельно (NEIROMASTER_PUSH_WORKERS,
-по умолчанию 20). Стресс-тест: по одному — 66 мс на пуш, 1000 сотрудников ~66 с.
+FCM v1 без batch-эндпоинта: одно сообщение на токен, но параллельно — потоков по мощности
+сервера (sizing.push_workers, ручная замена — NEIROMASTER_PUSH_WORKERS); у каждого потока своё
+соединение с FCM (без TLS-рукопожатия на каждый пуш). Стресс-тест, 1000 сотрудников: по одному
+— 66 с, 20 потоков — 15 с.
 """
 
 import os
@@ -34,7 +36,14 @@ _SA_DEFAULT = next((p for p in (BASE_DIR / "data" / "secrets" / "fcm-service-acc
 
 _sa_cache = None   # (google credentials, project_id) — ленивое, кэшируется
 _sa_lock = threading.Lock()   # параллельные отправки не должны обновлять токен наперегонки
-_WORKERS = int(os.environ.get("NEIROMASTER_PUSH_WORKERS", "20"))
+_local = threading.local()     # requests.Session на поток: соединение с FCM переиспользуется
+
+
+def _http():
+    s = getattr(_local, "s", None)
+    if s is None:
+        s = _local.s = requests.Session()
+    return s
 
 
 # ---------- Хранилище токенов ----------
@@ -116,7 +125,7 @@ def _send_one(token: str, title: str, body: str, data: dict) -> str:
         }
     }
     try:
-        r = requests.post(url, json=message, timeout=_TIMEOUT,
+        r = _http().post(url, json=message, timeout=_TIMEOUT,
                           headers={"Authorization": f"Bearer {access}",
                                    "Content-Type": "application/json"})
         if r.status_code == 200:
@@ -145,7 +154,8 @@ def notify(items: list) -> int:
              it.get("data") or {}) for it in items for tok in by_user.get(it.get("user_id"), [])]
     if not jobs:
         return 0
-    with ThreadPoolExecutor(max_workers=max(1, min(_WORKERS, len(jobs)))) as ex:
+    import sizing
+    with ThreadPoolExecutor(max_workers=max(1, min(sizing.push_workers(), len(jobs)))) as ex:
         results = list(ex.map(lambda j: _send_one(*j), jobs))
     for (tok, *_), res in zip(jobs, results):
         if res == "unregistered":

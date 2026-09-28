@@ -23,3 +23,10 @@ def test_env_overrides(monkeypatch):
 
 def test_detects_something():
     assert sizing.cpus() >= 1 and sizing.mem_gb() > 0
+
+
+def test_push_workers(monkeypatch):
+    monkeypatch.delenv("NEIROMASTER_PUSH_WORKERS", raising=False)
+    assert (sizing.push_workers(1), sizing.push_workers(4), sizing.push_workers(32)) == (12, 48, 100)
+    monkeypatch.setenv("NEIROMASTER_PUSH_WORKERS", "5")
+    assert sizing.push_workers(4) == 5
