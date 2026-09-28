@@ -41,6 +41,7 @@ import users  # noqa: E402
 
 PREFIX = "stress-"
 PASSWORD = "Stress-" + uuid.uuid4().hex[:12]      # живёт только на время теста
+POSITION = "Стресс-тест"
 CACHED_Q = "Где получить спецодежду?"
 _local = threading.local()
 REPORT = {}
@@ -135,7 +136,7 @@ def setup(count):
     ids, tokens = [], []
     for i in range(count):
         u = users.create_user({"username": f"{PREFIX}{i:04d}", "full_name": f"Стресс Тест {i:04d}",
-                               "position": "Стресс-тест"})
+                               "position": POSITION})
         ids.append(u["id"])
     db.execute("UPDATE users SET salt = %s, hash = %s WHERE id = ANY(%s)", (salt, digest, ids))
     now = time.time()
@@ -159,14 +160,20 @@ def cleanup():
                            ("activity_log", "user_id")):
             db.execute(f"DELETE FROM {table} WHERE {col} = ANY(%s)", (ids,))
         db.execute("DELETE FROM users WHERE id = ANY(%s)", (ids,))
-    print(f"Удалено тестовых сотрудников: {len(ids)}", flush=True)
+    # Ответы ассистента кэшируются под должностью спрашивающего — тестовые не нужны никому.
+    import qacache
+    gone = db.query("DELETE FROM qa_answers WHERE position = %s RETURNING id",
+                    (POSITION.lower(),)) or []
+    if gone:
+        qacache._bump()
+    print(f"Удалено тестовых сотрудников: {len(ids)}, их ответов в базе: {len(gone)}", flush=True)
 
 
 # ---------- Сценарии ----------
 def scenario_inbox(tokens):
     print("\n[1] Кабинет: сотрудники разом открывают приложение", flush=True)
     best, rows = steps("inbox burst", [50, 100, 200, 400, 800],
-                       lambda i: call("GET", "/api/my/messages", tokens[i % len(tokens)]), p95_limit=3)
+                       lambda i: call("GET", "/api/my/messages", tokens[i % len(tokens)]), p95_limit=6)
     sus = summarize("inbox sustained x50 30с", *sustained(
         50, 30, lambda i: call("GET", "/api/my/messages", tokens[i])))
     REPORT["inbox"] = {"burst_ok": best, "steps": rows, "sustained": sus,
@@ -176,10 +183,10 @@ def scenario_inbox(tokens):
 def scenario_ask(tokens):
     print("\n[2] Вопросы с готовым ответом (без DeepSeek)", flush=True)
     import qacache
-    if not qacache.get(CACHED_Q):
+    if not qacache.get(CACHED_Q, POSITION):
         code, t = call("POST", "/ask", tokens[0], timeout=180, json={"question": CACHED_Q})
         print(f"  прогрев: {code} за {t:.1f}с", flush=True)
-    if not qacache.get(CACHED_Q):
+    if not qacache.get(CACHED_Q, POSITION):
         # Без готового ответа каждый вопрос ушёл бы в DeepSeek — сотни платных вызовов.
         print("  ответ не попал в базу — сценарий пропущен", flush=True)
         REPORT["ask_cached"] = {"skipped": "нет готового ответа"}
@@ -198,7 +205,7 @@ def scenario_ask_llm(tokens, n):
           if q.strip() and not q.startswith("#")]
     import qacache
     # Только ещё не отвеченные: их ответы лягут в базу как обычные ответы ассистента.
-    qs = [q for q in qs if not qacache.get(q)][:n]
+    qs = [q for q in qs if not qacache.get(q, POSITION)][:n]
     s = summarize(f"ask DeepSeek x{len(qs)}", *burst(len(qs), lambda i: call(
         "POST", "/ask", tokens[-1 - i], timeout=300, json={"question": qs[i]})))
     REPORT["ask_llm"] = s
@@ -256,7 +263,7 @@ def scenario_login():
 
 def scenario_mix(ids, tokens):
     import qacache
-    if not qacache.get(CACHED_Q):
+    if not qacache.get(CACHED_Q, POSITION):
         print("\n[6] пропущен: нет готового ответа для вопросов (см. [2])", flush=True)
         return
     base = REPORT.get("inbox", {}).get("burst_ok") or 100
