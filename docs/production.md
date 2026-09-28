@@ -54,7 +54,7 @@ sudo systemctl status rag-app 'rag-worker@*'
 | Журнал действий | `/logs`: входы, неудачные входы, удаления, выдача паролей, смена ролей |
 | Бэкап | `pg_dump` ежедневно + S3 с оригиналами документов. Файл ключа `data/secrets/pii.key` — в отдельном хранилище секретов, не вместе с дампом |
 | Обновление | `git pull && sudo systemctl restart rag-app 'rag-worker@*'`. Схема БД и миграции применяются сами при старте; сайт уже собран в `static/app/` — Node.js на сервере не нужен |
-| Тесты перед выкаткой | `python run_tests.py` (нужна тестовая БД `NEIROMASTER_TEST_DSN`); CI — `.github/workflows/tests.yml` |
+| Тесты перед выкаткой | `python tests/run_tests.py` (нужна тестовая БД `NEIROMASTER_TEST_DSN`); CI — `.github/workflows/tests.yml` |
 
 ## 5. Нагрузка
 
@@ -67,7 +67,7 @@ sudo systemctl status rag-app 'rag-worker@*'
 - DeepSeek: `DEEPSEEK_MAX_CONCURRENCY` — общий на кластер потолок одновременных запросов.
 - Лимиты: `NEIROMASTER_LOGIN_RATE` (входов в минуту с IP, по умолчанию 120 — вся смена за
   одним NAT), `NEIROMASTER_ASK_RATE` (вопросов в минуту на человека, 20).
-- Нагрузочный прогон: `python loadtest.py` на стенде.
+- Нагрузочный прогон: `python scripts/loadtest.py` на стенде.
 
 ### Сайт не загружается или падает при переходах
 

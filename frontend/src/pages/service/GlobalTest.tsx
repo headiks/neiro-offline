@@ -1,8 +1,10 @@
-// Диагностика: все служебные инструменты в одном месте.
-import { useEffect } from 'react';
+// Диагностика: все служебные инструменты в одном месте. Раздел закрыт отдельным паролем
+// (сервер: deps.require_globaltest) — без него ни страницы, ни их API недоступны.
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, Database, FlaskConical, HardDrive, LayoutGrid, ListChecks, ScanText, ScrollText, Table2, type LucideIcon } from 'lucide-react';
-import { PageHeader } from '../../ui';
+import { Bell, Database, FlaskConical, HardDrive, LayoutGrid, ListChecks, Lock, LockOpen, ScanText, ScrollText, Table2, type LucideIcon } from 'lucide-react';
+import { api, messageOf } from '../../lib/api';
+import { Button, Callout, Card, Field, Input, PageHeader, Spinner } from '../../ui';
 
 const DATA: [string, LucideIcon, string, string][] = [
   ['/documents-table', Table2, 'Реестр документов', 'Таблица метаданных обработанных файлов.'],
@@ -28,11 +30,41 @@ function Grid({ items }: { items: typeof DATA }) {
   );
 }
 
+function Unlock({ configured, onDone }: { configured: boolean; onDone: () => void }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true); setError(null);
+    try { await api.post('/api/globaltest/unlock', { password }); onDone(); }
+    catch (e) { setError(messageOf(e)); setBusy(false); }
+  };
+  return (
+    <Card style={{ maxWidth: 420 }}>
+      <form className="nm-stack" style={{ gap: 14 }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <div className="nm-row" style={{ gap: 8 }}><Lock aria-hidden /><b>Раздел закрыт паролем</b></div>
+        {!configured && <Callout tone="warn">Пароль раздела не настроен на сервере.</Callout>}
+        {error && <Callout tone="danger">{error}</Callout>}
+        <Field label="Пароль раздела">
+          <Input type="password" autoComplete="off" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
+        </Field>
+        <Button type="submit" variant="primary" icon={LockOpen} loading={busy} disabled={!password}>Открыть</Button>
+      </form>
+    </Card>
+  );
+}
+
 export default function GlobalTest() {
-  useEffect(() => { document.title = 'Диагностика · НейроМастер'; }, []);
+  const [state, setState] = useState<{ configured: boolean; unlocked: boolean } | null>(null);
+  const load = () => api.get<{ configured: boolean; unlocked: boolean }>('/api/globaltest').then(setState).catch(() => setState({ configured: false, unlocked: false }));
+  useEffect(() => { document.title = 'Диагностика · НейроМастер'; load(); }, []);
+  const lock = () => api.post('/api/globaltest/lock').finally(load);
+  if (!state) return <div className="nm-page"><PageHeader title="Диагностика" /><Spinner /></div>;
+  if (!state.unlocked) return <div className="nm-page"><PageHeader title="Диагностика" subtitle="Тесты и просмотр внутренних данных." /><Unlock configured={state.configured} onDone={load} /></div>;
   return (
     <div className="nm-page">
-      <PageHeader title="Диагностика" subtitle="Служебные инструменты: тесты и просмотр внутренних данных. Вынесены сюда, чтобы не мешать основной работе." />
+      <PageHeader title="Диагностика" subtitle="Служебные инструменты: тесты и просмотр внутренних данных. Вынесены сюда, чтобы не мешать основной работе."
+                  actions={<Button icon={Lock} onClick={lock}>Закрыть раздел</Button>} />
       <div className="nm-section-label">Данные и документы</div>
       <Grid items={DATA} />
       <div className="nm-section-label">Диагностика и тесты</div>

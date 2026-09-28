@@ -1,0 +1,8 @@
+# Вход снаружи: HTTPS -> web:8000. Адрес — переменная SITE_ADDRESS (docker-compose.yml):
+#   домен (nm.company.ru)   — сертификат Let's Encrypt автоматически, нужен интернет;
+#   IP-адрес или localhost  — сертификат внутреннего CA Caddy, работает без интернета.
+# Корпоративный сертификат: смонтируйте его в контейнер и добавьте в блок
+#   tls /certs/cert.pem /certs/key.pem
+{$SITE_ADDRESS:localhost} {
+	reverse_proxy web:8000
+}

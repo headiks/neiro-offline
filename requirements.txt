@@ -1,18 +1,3 @@
+# Полный набор (web + worker): разбор документов docling тянет torch — это только worker.
+-r requirements-web.txt
 docling>=2.0.0
-requests>=2.31.0
-# Векторный стор (Qdrant) и эмбеддинги удалены: классификацию/поиск/генерацию делает
-# DeepSeek через docpipe (LLM-метки этапов/подэтапов в Postgres). GPU/веса не нужны.
-fastapi>=0.110.0
-uvicorn>=0.29.0
-gunicorn>=21.2           # прод-сервер: несколько uvicorn-воркеров (высокая нагрузка)
-redis>=5.0               # очередь задач + общий стейт (прогресс/отмена, история, лимитер DeepSeek)
-rq>=1.16                 # Redis Queue: worker-процессы под тяжёлую классификацию/генерацию
-python-multipart>=0.0.9
-psycopg[binary]>=3.1
-psycopg_pool>=3.2
-cryptography>=42.0        # шифрование ПДн в БД (Fernet), только если задан NEIROMASTER_PII_KEY
-openpyxl>=3.1             # чтение xlsx (штатное расписание -> профили сотрудников)
-xlrd>=2.0.1               # чтение старого .xls (Excel 97-2003)
-boto3>=1.34               # S3-совместимое хранилище оригиналов, только если задан NEIROMASTER_S3_ENDPOINT
-pypdf>=4.0                # нормализация поворота страниц PDF перед docling (боком-нарисованные таблицы)
-google-auth>=2.23.0

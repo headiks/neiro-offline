@@ -1,0 +1,37 @@
+# Секреты и локальное окружение — в образ не попадают никогда.
+.env
+.env.*
+!.env.example
+data/secrets/
+data/owner_initial_credentials.txt
+
+# Рабочие данные — живут в томах compose, не в образе.
+data/documents/
+data/converted/
+data/processed/
+data/app/
+data/*.json
+!data/knowledge_seed.json
+!data/stage_catalog.json
+data/*.migrated
+
+# Сайт собирается внутри образа (стадия frontend) — старую сборку не берём.
+static/app/
+**/node_modules/
+
+# Не нужно в рантайме.
+.git/
+.github/
+mobile/
+docs/
+examples/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.venv/
+venv/
+tests/
+scripts/loadtest.py
+iphone/
+*.apk
+*.aab

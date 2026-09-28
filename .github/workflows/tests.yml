@@ -32,7 +32,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
-      - run: python run_tests.py
+      - run: python tests/run_tests.py
 
   frontend:
     # Сайт и приложение: проверка типов и сборка (общий код shared/ проверяется в обоих).
@@ -54,3 +54,11 @@ jobs:
         working-directory: mobile
       - run: npx tsc --noEmit
         working-directory: mobile
+
+  docker:
+    # Конфиг compose валиден и образ web собирается (worker с docling — долго, не каждый push).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - run: docker build --target web -t neiromaster-web:ci .
