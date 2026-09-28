@@ -43,7 +43,7 @@ FROM base AS web
 COPY --chown=app:app . .
 COPY --from=frontend --chown=app:app /src/static/app static/app
 RUN mkdir -p data/documents data/converted data/processed data/secrets data/app \
- && chown -R app:app data
+ && chown app:app . && chown -R app:app data
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
