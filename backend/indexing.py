@@ -243,10 +243,10 @@ def docs_changed():
     Модель трогает только подэтапы, чьи документы поменялись (отпечатки в planner) —
     админу не нужно помнить про «Догенерировать недостающее»."""
     try:
-        import qacache
-        qacache.bump_version()             # закэшированные ответы на вопросы устарели
+        import jobs
+        jobs.enqueue_faq_refresh()         # база ответов: FAQ заново только по изменённым подэтапам
     except Exception as e:
-        _log("QA", f"кэш ответов не сброшен: {e}")
+        _log("QA", f"обновление базы ответов не запущено: {e}")
     try:
         import planner
         n = planner.refresh_generated_plans()

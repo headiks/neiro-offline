@@ -341,8 +341,18 @@ def test_questions_in_db_and_order(env, owner):
     assert [q["question"] for q in questions.list_for_user("emp-q")][0] == "Первый вопрос"
     assert questions.list_all("open")[0]["reason"] == questions.REASON_ESCALATE
     c = _as_owner(env, owner)
-    r = c.post(f"/questions/{q1['id']}/resolve", json={"answer": "Ответ"}, headers=ORIGIN)
+    r = c.post(f"/questions/{q1['id']}/resolve", headers=ORIGIN,
+               json={"answer": "Ответ", "add_to_base": True, "base_question": "Где столовая?"})
     assert r.status_code == 200 and r.json()["status"] == "resolved"
+    # Ответ специалиста — в базе ответов: следующий такой вопрос получит его сразу.
+    import qacache
+    assert qacache.get("столовая где", "")["qa_source"] == "human"
+    base = c.get("/qa-base?source=human").json()
+    item = next(i for i in base["items"] if i["question"] == "Где столовая?")
+    r = c.put(f"/qa-base/{item['id']}", headers=ORIGIN, json={"question": "Где столовая?", "answer": "Корпус 2"})
+    assert r.json()["answer"] == "Корпус 2"
+    assert c.delete(f"/qa-base/{item['id']}", headers=ORIGIN).json() == {"deleted": True}
+    assert qacache.get("столовая где", "") is None
 
 
 def test_ask_limits(env, owner):

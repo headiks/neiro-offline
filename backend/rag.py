@@ -387,6 +387,15 @@ def _strip_doc_refs(text: str) -> str:
     out = re.sub(r"[ \t]+\n", "\n", out)
     return re.sub(r"\n{3,}", "\n\n", out).strip()
 
+_NO_INFO = ("точных сведений", "сведений об этом у меня нет")
+
+
+def has_answer(text) -> bool:
+    """Ответ по существу, а не «точных сведений об этом у меня нет — уточните у …»."""
+    low = (text or "").strip().lower()
+    return bool(low) and not any(m in low[:120] for m in _NO_INFO)
+
+
 def generate_answer(question, context_fragments, position: str = ""):
     log("GENERATE", f"Генерация ответа с использованием {len(context_fragments)} фрагментов")
     context_text = "\n\n".join([f"--- Фрагмент {i+1} ---\n{frag}" for i, frag in enumerate(context_fragments)])
@@ -490,7 +499,11 @@ def handle_question(question, history=None, current_stage_ids=None, position=Non
     # Кэш частых вопросов: тот же по смыслу вопрос (набор значимых слов) при той же базе
     # документов и должности — готовый ответ без маршрутизации и генерации (qacache).
     import qacache
-    cached = qacache.get(effective_question, position or "")
+    try:
+        cached = qacache.get(effective_question, position or "")
+    except Exception as e:                  # база ответов недоступна — отвечаем как обычно
+        log("CACHE", f"база ответов недоступна: {e}")
+        cached = None
     if cached:
         log("CACHE", "Ответ из кэша частых вопросов")
         return {"question": question,
@@ -545,10 +558,15 @@ def handle_question(question, history=None, current_stage_ids=None, position=Non
         log("SOURCES", "; ".join(source_names) or "(нет)")
     else:
         log("HANDLE", "Нет размеченных документов под тему вопроса")
-    if answer:
-        qacache.put(effective_question, position or "",
-                    {"answer": answer, "sources": sources, "route": route,
-                     "classification": route_info, "route_substages": picked})
+    if has_answer(answer):
+        # «Сведений нет» не кэшируем: появится документ или ответ специалиста — пусть найдут.
+        try:
+            qacache.put(effective_question, position or "",
+                        {"answer": answer, "sources": sources, "route": route,
+                         "classification": route_info, "route_substages": picked},
+                        source="model", substages=picked)
+        except Exception as e:
+            log("CACHE", f"ответ не сохранён в базу ответов: {e}")
 
     return {
         **base_result,

@@ -1,6 +1,6 @@
 // Вопросы сотрудников, на которые ассистент не ответил сам (нет в документах или похоже на
 // ЧС). Слева очередь (ЧС сверху), справа карточка ответа — ответ уходит сотруднику в кабинет
-// и пушем.
+// и пушем. Вкладка «База ответов» — готовые ответы, которые ассистент выдаёт мгновенно.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CircleCheck, Link2, MessageCircleQuestion, RefreshCw, SendHorizontal, Siren } from 'lucide-react';
 import { ago, initials, ruDateTime } from '@shared/format';
@@ -9,22 +9,26 @@ import { api, enc, messageOf } from '../../lib/api';
 import { usePolling } from '../../lib/poll';
 import { useToast } from '../../lib/toast';
 import type { AdminQuestion } from '../../lib/types';
-import { Avatar, Badge, Button, Callout, Card, Empty, Field, PageHeader, Segmented, Spinner, StatusBadge, Textarea } from '../../ui';
+import { Avatar, Badge, Button, Callout, Card, Checkbox, Empty, Field, Input, PageHeader, Segmented, Spinner, StatusBadge, Textarea } from '../../ui';
+import QaBase from './QaBase';
 import { DataTable, type Column } from '../../ui/DataTable';
 
-type View = 'open' | 'resolved' | 'all';
+type View = 'open' | 'resolved' | 'all' | 'base';
 const isSos = (q: AdminQuestion) => q.reason === 'escalate';
 
 function AnswerPanel({ q, onDone }: { q: AdminQuestion; onDone: () => void }) {
   const [answer, setAnswer] = useState('');
+  const [toBase, setToBase] = useState(true);
+  const [baseQuestion, setBaseQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
-  useEffect(() => { setAnswer(''); }, [q.id]);
+  // Ответ на ЧС — про конкретный случай, в общую базу по умолчанию не кладём.
+  useEffect(() => { setAnswer(''); setToBase(!isSos(q)); setBaseQuestion(q.resolved_question || q.question); }, [q.id]);
   const send = async () => {
     if (!answer.trim()) return;
     setBusy(true);
     try {
-      await api.post(`/questions/${enc(q.id)}/resolve`, { answer: answer.trim() });
+      await api.post(`/questions/${enc(q.id)}/resolve`, { answer: answer.trim(), add_to_base: toBase, base_question: baseQuestion.trim() || null });
       toast.ok('Ответ отправлен сотруднику');
       onDone();
     } catch (e) { toast.error(messageOf(e)); } finally { setBusy(false); }
@@ -58,6 +62,12 @@ function AnswerPanel({ q, onDone }: { q: AdminQuestion; onDone: () => void }) {
           <Field label={`Ответ ${who ? `для ${who}` : 'сотруднику'}`}>
             <Textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Ответ сотруднику (можно после консультации со специалистом)" />
           </Field>
+          <Checkbox label="Добавить в базу ответов — похожий вопрос получит этот ответ сразу" checked={toBase} onChange={setToBase} />
+          {toBase && (
+            <Field label="Вопрос для базы" help="Без имён и личных подробностей — так, как его задал бы любой сотрудник">
+              <Input value={baseQuestion} onChange={(e) => setBaseQuestion(e.target.value)} />
+            </Field>
+          )}
           <Button variant="primary" size="lg" icon={SendHorizontal} loading={busy} disabled={!answer.trim()} onClick={send}>Отправить ответ</Button>
         </>
       )}
@@ -77,7 +87,7 @@ export default function Questions() {
       setOpenCount(d.open_count || 0);
     }).catch(() => setItems((x) => x || []));
   }, [view]);
-  usePolling(load, 30000, [view]);
+  usePolling(() => { if (view !== 'base') load(); }, 30000, [view]);
   useEffect(() => { setItems(null); setSelected(null); }, [view]);
 
   const rows = useMemo(() => (items || []).slice().sort((a, b) =>
@@ -101,8 +111,8 @@ export default function Questions() {
       <PageHeader title="Вопросы сотрудников" subtitle="Сюда попадают вопросы с пометкой ЧС и те, на которые в регламентах не нашлось ответа. Ответ придёт сотруднику в кабинет."
                   actions={<Button variant="ghost" icon={RefreshCw} onClick={load}>Обновить</Button>} />
       <Segmented label="Какие вопросы" value={view} onChange={setView}
-                 options={[{ value: 'open', label: `Открытые${openCount ? ` · ${openCount}` : ''}` }, { value: 'resolved', label: 'Отвечено' }, { value: 'all', label: 'Все' }]} />
-      {items === null ? <Spinner /> : !rows.length ? (
+                 options={[{ value: 'open', label: `Открытые${openCount ? ` · ${openCount}` : ''}` }, { value: 'resolved', label: 'Отвечено' }, { value: 'all', label: 'Все' }, { value: 'base', label: 'База ответов' }]} />
+      {view === 'base' ? <QaBase /> : items === null ? <Spinner /> : !rows.length ? (
         <Card pad={false}><Empty icon={view === 'open' ? CircleCheck : MessageCircleQuestion}>{view === 'open' ? 'Открытых вопросов нет — ассистент справляется сам.' : 'Вопросов нет.'}</Empty></Card>
       ) : (
         <div className="nm-two-pane">

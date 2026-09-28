@@ -13,6 +13,7 @@
 #   db-processed — основная БД: всё обработанное + рабочие данные приложения
 #   db-raw       — исходники: оригиналы документов и загруженные штатки
 #   redis        — очередь задач и общий стейт процессов
+#   embed        — векторы вопросов для базы ответов (bge-m3 на CPU, без интернета)
 
 name: neiromaster
 
@@ -30,6 +31,7 @@ x-app: &app
     NEIROMASTER_DB_DSN: postgresql://neiromaster:${POSTGRES_PROCESSED_PASSWORD:-neiromaster}@db-processed:5432/neiromaster
     NEIROMASTER_RAW_DB_DSN: postgresql://neiromaster_raw:${POSTGRES_RAW_PASSWORD:-neiromaster_raw}@db-raw:5432/neiromaster_raw
     REDIS_URL: redis://redis:6379/0
+    NEIROMASTER_EMBED_URL: http://embed:8080
     WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
     NEIROMASTER_DB_POOL: ${NEIROMASTER_DB_POOL:-15}
   volumes:
@@ -69,6 +71,26 @@ services:
     depends_on:
       # web создаёт схему БД под замком — worker стартует после него, без гонки миграций.
       web: {condition: service_healthy}
+
+  # Векторы вопросов для базы ответов: похожий по смыслу вопрос получает готовый ответ.
+  # Модель (bge-m3, ~600 МБ) скачивается при первом старте в том models-llm; дальше — офлайн.
+  embed:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    restart: unless-stopped
+    environment:
+      LLAMA_CACHE: /models
+    command: ["-hf", "ggml-org/bge-m3-Q8_0-GGUF", "--embeddings", "-c", "2048", "-ub", "2048",
+              "--host", "0.0.0.0", "--port", "8080", "-t", "${EMBED_THREADS:-2}"]
+    volumes: [models-llm:/models]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+    networks: [backend]
 
   caddy:
     image: caddy:2-alpine
@@ -153,5 +175,6 @@ volumes:
   secrets:
   app-files:
   models:
+  models-llm:
   caddy-data:
   caddy-config:

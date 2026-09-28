@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 import stages
 import questions
+import qacache
 from deps import require_admin, admin_only
 
 router = APIRouter()
@@ -51,6 +52,10 @@ def delete_stage(stage_id: str):
 # ---------- Вопросы без ответа (эскалация человеку) ----------
 class ResolveRequest(BaseModel):
     answer: str
+    # Положить ответ в базу ответов: следующий похожий вопрос получит его мгновенно.
+    # base_question — вопрос в общем виде (без имён и личных подробностей сотрудника).
+    add_to_base: bool = False
+    base_question: str | None = None
 
 
 @router.get("/questions", dependencies=admin_only)
@@ -80,4 +85,45 @@ def resolve_question(qid: str, req: ResolveRequest, actor: dict = Depends(requir
             )
         except Exception as e:
             print(f"[questions] уведомление об ответе не отправлено: {e}")
+    if req.add_to_base:
+        base_q = (req.base_question or "").strip() or entry.get("resolved_question") or entry["question"]
+        qacache.put(base_q, "", {"answer": entry["answer"]}, source="human")
     return entry
+
+
+# ---------- База готовых ответов (qacache) ----------
+class QaEditRequest(BaseModel):
+    question: str
+    answer: str
+
+
+@router.get("/qa-base", dependencies=admin_only)
+def qa_base(source: str | None = None):
+    """Все готовые ответы: частые вопросы, по секциям, ответы ассистента и специалистов."""
+    return {"items": qacache.list_all(source=source or ""), "stats": qacache.stats()}
+
+
+@router.put("/qa-base/{qa_id}", dependencies=admin_only)
+def qa_base_edit(qa_id: int, req: QaEditRequest, actor: dict = Depends(require_admin)):
+    try:
+        item = qacache.update(qa_id, req.question, req.answer,
+                              actor.get("full_name") or actor.get("username") or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if item is None:
+        raise HTTPException(status_code=404, detail="Ответ не найден")
+    return item
+
+
+@router.delete("/qa-base/{qa_id}", dependencies=admin_only)
+def qa_base_delete(qa_id: int):
+    if not qacache.delete(qa_id):
+        raise HTTPException(status_code=404, detail="Ответ не найден")
+    return {"deleted": True}
+
+
+@router.post("/qa-base/refresh", dependencies=admin_only)
+def qa_base_refresh():
+    """Догенерировать частые вопросы по новым/изменённым документам (в фоне)."""
+    import jobs
+    return {"queued": jobs.enqueue_faq_refresh()}
