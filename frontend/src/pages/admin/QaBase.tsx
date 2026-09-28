@@ -11,12 +11,12 @@ import { useConfirm } from '../../ui/confirm';
 import { Badge, Button, Card, Empty, Field, Input, Segmented, Spinner, Textarea } from '../../ui';
 import { DataTable, type Column } from '../../ui/DataTable';
 
-type Source = 'faq' | 'section' | 'model' | 'human';
+type Source = 'faq' | 'section' | 'model' | 'local' | 'human';
 type QaItem = { id: number; question: string; answer: string; source: Source; position: string; hits: number; updated_at: string };
 type Filter = '' | Source;
 
-const SOURCE_LABEL: Record<Source, string> = { faq: 'Частый вопрос', section: 'По документу', model: 'Ответ ассистента', human: 'Специалист' };
-const SOURCE_TONE: Record<Source, 'accent' | 'muted' | 'ok'> = { faq: 'accent', section: 'muted', model: 'muted', human: 'ok' };
+const SOURCE_LABEL: Record<Source, string> = { faq: 'Частый вопрос', section: 'По документу', model: 'Ответ ассистента', local: 'Локальная модель', human: 'Специалист' };
+const SOURCE_TONE: Record<Source, 'accent' | 'muted' | 'ok'> = { faq: 'accent', section: 'muted', model: 'muted', local: 'muted', human: 'ok' };
 
 function Editor({ item, onSaved }: { item: QaItem; onSaved: () => void }) {
   const [question, setQuestion] = useState(item.question);
@@ -92,7 +92,7 @@ export default function QaBase() {
       <div className="nm-row" style={{ flexWrap: 'wrap' }}>
         <Segmented label="Источник ответа" value={filter} onChange={setFilter}
                    options={[{ value: '', label: `Все${total ? ` · ${total}` : ''}` }, { value: 'faq', label: `Частые${count('faq')}` },
-                             { value: 'section', label: `По документам${count('section')}` }, { value: 'model', label: `Ассистент${count('model')}` },
+                             { value: 'section', label: `По документам${count('section')}` }, { value: 'model', label: `Ассистент${count('model')}` }, { value: 'local', label: `Локальная${count('local')}` },
                              { value: 'human', label: `Специалист${count('human')}` }]} />
         <span className="nm-grow" />
         <Button variant="ghost" icon={Sparkles} onClick={refresh}>Дополнить по документам</Button>

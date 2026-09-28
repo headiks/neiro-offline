@@ -95,11 +95,15 @@ def enqueue_index(job_id: str) -> bool:
 
 
 def enqueue_reanalyze_all(job_id: str) -> bool:
+    import deepseek
+    deepseek.require_online("Переразметка документов")
     return _run_or_thread(_queue(), run_reanalyze_all, job_id,
                           job_timeout=REANALYZE_ALL_TIMEOUT)
 
 
 def enqueue_reanalyze_document(filename: str) -> bool:
+    import deepseek
+    deepseek.require_online("Переразметка документов")
     return _run_or_thread(_queue(), run_reanalyze_document, filename)
 
 

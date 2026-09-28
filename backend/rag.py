@@ -457,6 +457,78 @@ def fetch_by_substages(substage_ids, budget=None):
     return frags, sources
 
 
+# ---------- Офлайн: одна генерация локальной модели ----------
+OFFLINE_SYSTEM = """Ты — помощник нового сотрудника завода. Ответь на вопрос ТОЛЬКО по справке
+ниже, на русском, коротко: до 5 предложений или короткий список. Давай конкретику из справки:
+числа, сроки, места, должности, порядок действий. Не упоминай справку, документы, фрагменты
+и источники — просто ответь как знающий коллега. Ничего не выдумывай.
+Если в справке нет ответа именно на этот вопрос — напиши ровно одно слово: НЕТ_ОТВЕТА"""
+NO_ANSWER_MARK = "НЕТ_ОТВЕТА"
+# Готовые пары ниже этой похожести — шум, а не подсказка модели и сотруднику.
+OFFLINE_PAIR_MIN = float(os.environ.get("NEIROMASTER_OFFLINE_PAIR_MIN", "0.6"))
+# Бюджет под 4 vCPU и Qwen3-4B (замер на проде: чтение ~12 ток/с, письмо ~2,5 ток/с,
+# ~2,5 символа на токен в русском): 1200 символов справки + до 150 токенов ответа ≈ 60–90 с.
+# Железо вдвое быстрее — удвойте оба числа.
+OFFLINE_CONTEXT_CHARS = int(os.environ.get("NEIROMASTER_OFFLINE_CONTEXT_CHARS", "1200"))
+OFFLINE_ANSWER_TOKENS = int(os.environ.get("NEIROMASTER_OFFLINE_ANSWER_TOKENS", "150"))
+OFFLINE_PAIR_CHARS = 600
+_FOLLOW_UP = re.compile(r"^(а|и|но|тогда|там|это|его|её|ее|их|туда|сюда|где|когда|сколько|кто|как)\b", re.I)
+
+
+def resolve_offline(question, history):
+    """Контекст диалога без модели: короткое продолжение («а где взять?») дописываем к
+    прошлому вопросу. Длинный вопрос с предметными словами — самостоятельный."""
+    last = next((h.get("question") for h in reversed(history or []) if h.get("question")), None)
+    words = question.split()
+    if last and len(words) <= 4 and not is_greeting_or_general(question) \
+            and (_FOLLOW_UP.match(question.strip()) or not has_rag_keywords(question)):
+        return {"standalone_question": f"{last} {question}", "context_used": True}
+    return {"standalone_question": question, "context_used": False}
+
+
+def answer_offline(question, position=""):
+    """Справка = ближайшие готовые пары вопрос–ответ (качество DeepSeek) + фрагменты
+    документов (docindex). Локальная модель пишет ответ или «НЕТ_ОТВЕТА» — тогда вопрос уйдёт
+    специалисту, а сотрудник увидит похожие вопросы, на которые ответ есть."""
+    if is_greeting_or_general(question):
+        return {"route": "general", "classification": {"route": "general"}, "top_fragments": [],
+                "answer": "Здравствуйте! Чем я могу вам помочь по вопросам регламентов и охраны труда?"}
+    import docindex
+    import qacache
+    pairs = [p for p in qacache.nearest(question, position, k=3) if p["score"] >= OFFLINE_PAIR_MIN]
+    chunks = docindex.search(question, k=3)
+    # Слабый CPU читает ~16 токенов/с: справка — не весь фрагмент, а ближайшие к вопросу
+    # предложения. Лучшая готовая пара (ответ DeepSeek) — первой, короче.
+    parts = [f"Вопрос: {p['question']}\nОтвет: {p['answer'][:OFFLINE_PAIR_CHARS]}" for p in pairs[:1]]
+    rest = OFFLINE_CONTEXT_CHARS - sum(len(p) for p in parts)
+    extract = docindex.compress(question, [c["text"] for c in chunks] +
+                                [p["answer"] for p in pairs[1:]], rest)
+    if extract:
+        parts.append(extract)
+    result = {"route": "rag", "classification": {"route": "rag", "offline": True},
+              "top_fragments": parts, "similar": [p["question"] for p in pairs],
+              "sources": [{"source": c["filename"]} for c in chunks], "answer": None}
+    if not parts:
+        return result
+    pos_line = f"Должность сотрудника: {position}\n" if (position or "").strip() else ""
+    raw = deepseek.chat(OFFLINE_SYSTEM, f"{pos_line}Вопрос: {question}\n\nСправка:\n"
+                        + "\n\n---\n\n".join(parts), max_tokens=OFFLINE_ANSWER_TOKENS)
+    # Маленькая модель иногда дописывает маркер после верного ответа: «нет ответа» — только
+    # если с него ответ начинается, хвостовой маркер вырезаем.
+    text = raw.strip()
+    answer = None if text.upper().startswith(NO_ANSWER_MARK) else \
+        _strip_doc_refs(re.sub(NO_ANSWER_MARK + r"[.!]?", "", text, flags=re.I))
+    if has_answer(answer):
+        result["answer"] = answer
+        subs = sorted({s for c in chunks for s in c["substages"]})
+        try:
+            qacache.put(question, position, {"answer": answer, "route": "rag"},
+                        source="local", substages=subs)
+        except Exception as e:
+            log("CACHE", f"ответ не сохранён в базу ответов: {e}")
+    return result
+
+
 # ---------- Основная функция ----------
 def handle_question(question, history=None, current_stage_ids=None, position=None):
     """
@@ -492,7 +564,9 @@ def handle_question(question, history=None, current_stage_ids=None, position=Non
 
     # Разрешаем зависимость от контекста ДО классификации/поиска — короткие вопросы
     # вроде "Где взять" сами по себе не несут смысла для векторного поиска.
-    resolved = resolve_question(question, history)
+    # Офлайн — без модели: слабый CPU тратит вызов только на сам ответ.
+    offline = deepseek.offline()
+    resolved = resolve_offline(question, history) if offline else resolve_question(question, history)
     effective_question = resolved["standalone_question"]
     context_used = resolved["context_used"]
 
@@ -511,6 +585,13 @@ def handle_question(question, history=None, current_stage_ids=None, position=Non
                 "context_used": context_used, "candidates": [], "top_fragments": [],
                 "elapsed_time": time.time() - total_start, "error": None, "cached": True,
                 **cached}
+
+    if offline:
+        return {"question": question,
+                "resolved_question": effective_question if context_used else None,
+                "context_used": context_used, "candidates": [],
+                **answer_offline(effective_question, position or ""),
+                "elapsed_time": time.time() - total_start, "error": None}
 
     route_info = route_question(effective_question)
     route = route_info["route"]

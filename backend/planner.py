@@ -1300,6 +1300,8 @@ def start_generation(plan: dict, positions: Optional[list] = None, include_gener
     задача не создаётся, ответ status='up_to_date'. Пока идёт генерация плана, новая не
     стартует: возвращается текущая (already_running). only_missing оставлен для совместимости
     — «догенерация» теперь частный случай инкрементальной генерации."""
+    import deepseek
+    deepseek.require_online("Генерация сообщений плана")
     profs = _norm_profs(positions, include_general)
     running = running_job_for(plan["plan_id"])
     if running:
@@ -1445,7 +1447,9 @@ def regenerate_one(plan: dict, message_id: str, profession: str = "") -> Optiona
     Перегенерирует один подэтап и обновляет сохранённое расписание нужной профессии.
     Возвращает обновлённое сообщение или None, если подэтап не найден.
     """
+    import deepseek
     import folders
+    deepseek.require_online("Генерация сообщения плана")
 
     items = {i["message_id"]: i for i in resolve_schedule(plan)}
     item = items.get(message_id)

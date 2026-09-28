@@ -478,7 +478,9 @@ def process_index_job(job_id: str):
 
 def enqueue_document(filepath: Path) -> dict:
     """Ставит уже сохранённый файл в очередь на индексацию. Возвращает запись задачи."""
+    import deepseek
     import jobs
+    deepseek.require_online("Загрузка и разбор документов")
     job_id = str(uuid.uuid4())
     filename = Path(filepath).name
     _set_index_job(job_id, filename=filename, filepath=str(filepath),

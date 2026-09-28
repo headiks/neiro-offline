@@ -5,6 +5,7 @@ qacache.py — база готовых ответов: похожий вопро
   faq     — топ-10 вопросов по подэтапу, пишет DeepSeek по документам (faq.py);
   section — 2 вопроса по каждой секции документа (faq.py);
   model   — ответ ассистента на вопрос сотрудника (rag.handle_question);
+  local   — ответ локальной модели в офлайн-режиме (rag.answer_offline);
   human   — ответ специалиста из очереди «Вопросы», если админ добавил его в базу.
 
 Поиск: сначала точное совпадение набора значимых слов (normalize), затем по смыслу —
@@ -37,7 +38,7 @@ from redis_conn import get_redis
 # Версия формата ответа: меняли промпт ответа (rag.GENERATE_SYSTEM) — увеличьте, и старые
 # ответы модели удалятся при старте. 3 — без ссылок на документы и устройство системы.
 ANSWER_FORMAT = 3
-SOURCES = ("faq", "section", "model", "human")
+SOURCES = ("faq", "section", "model", "local", "human")
 POS_BONUS = 0.02
 
 SCHEMA = (
@@ -236,7 +237,7 @@ def put(question: str, position: str, payload: dict, source: str = "model", subs
                       "meta": meta}], source)
 
 
-def delete_for_substages(substage_ids, sources=("faq", "model")) -> int:
+def delete_for_substages(substage_ids, sources=("faq", "model", "local")) -> int:
     """Документы подэтапов изменились — ответы, построенные на них, больше не верны."""
     ids = list(substage_ids or [])
     if not ids:

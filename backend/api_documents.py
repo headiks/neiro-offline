@@ -113,6 +113,8 @@ def upload_document(file: UploadFile = File(...), mode: str = "", confidential: 
     """
     if mode not in ("", "replace", "separate"):
         raise HTTPException(status_code=400, detail="mode: replace или separate")
+    import deepseek
+    deepseek.require_online("Загрузка документов")   # до сохранения: файл без разбора не нужен
     # Читаем не больше лимита +1 байт: иначе гигабайтный файл целиком буферизуется в
     # RAM ещё до проверки размера (потенциальный OOM). Лишний байт нужен, чтобы отличить
     # «ровно лимит» от «больше лимита».

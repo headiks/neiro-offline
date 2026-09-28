@@ -168,6 +168,10 @@ def _route_to_human(result: dict, user: dict) -> dict:
     result["error"] = None  # «нет кандидатов» — не ошибка для пользователя, это эскалация
     if not result.get("answer"):
         result["answer"] = ESCALATE_REPLY if reason == questions.REASON_ESCALATE else NO_ANSWER_REPLY
+        if reason == questions.REASON_NO_ANSWER and result.get("similar"):
+            # Пока специалист не ответил — вопросы рядом по смыслу, на которые ответ уже есть.
+            result["answer"] += "\n\nПохожие вопросы, на которые я могу ответить сразу:\n" + \
+                "\n".join(f"• {q}" for q in result["similar"][:3])
     return result
 
 

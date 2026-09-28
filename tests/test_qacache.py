@@ -82,6 +82,8 @@ def base():
     pii_key.ensure()
     docpipe.init_schema()
     qacache.init()
+    import docindex
+    docindex.init()
     yield
 
 
@@ -156,3 +158,21 @@ def test_faq_generated_once_and_refreshed_on_change(base, monkeypatch):
     db.execute("DELETE FROM sections WHERE id = 'sec1'")  # документ пересобран — старых секций нет
     faq.refresh_sections()
     assert "section" not in qacache.stats()
+
+
+@db_only
+def test_docindex_build_and_hybrid_search(base):
+    import db
+    import docindex
+    docindex.init()
+    db.execute("INSERT INTO documents (id, filename, content_hash) VALUES ('d2', 'wear.pdf', 'h2') "
+               "ON CONFLICT DO NOTHING")
+    db.execute("INSERT INTO sections (id, doc_id, seq, text) VALUES ('sec2', 'd2', 0, %s)",
+               ("Спецодежду выдают на складе в первый рабочий день.\n\nЗарплату перечисляют на карту.",))
+    db.execute("INSERT INTO section_labels (section_id, substages) VALUES ('sec2', %s::jsonb)",
+               ('[{"id": "s1.wear"}]',))
+    assert docindex.build() >= 1
+    assert docindex.build() == 0                                     # повторно — ничего нового
+    hits = docindex.search("Где выдают спецодежду?", k=1)
+    assert hits and "Спецодежду" in hits[0]["text"] and hits[0]["substages"] == ["s1.wear"]
+    assert docindex.stats()["sections_without_chunks"] == 0

@@ -15,6 +15,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +23,7 @@ from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 import db
+import deepseek
 import auth
 import users
 import folders
@@ -32,6 +34,7 @@ import documents
 import docregistry
 import questions
 import qacache
+import docindex
 import messaging
 import activitylog
 import security
@@ -155,6 +158,7 @@ async def lifespan(app: FastAPI):
         _step("реестр документов", documents.init)
         _step("посев структуры знаний", _seed_knowledge)
         _step("пайплайн разметки docpipe", _init_docpipe)
+        _step("индекс фрагментов документов", docindex.init)   # после таблицы sections
         _step("миграция старых данных", _migrate_legacy)
         _announce_owner()
         _step("очистка осиротевших меток docpipe", _prune_orphans)
@@ -170,6 +174,12 @@ async def lifespan(app: FastAPI):
 # открыты анониму и раскрывают полный список ручек — на проде не нужны.
 app = FastAPI(title="НейроМастер", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.exception_handler(deepseek.OfflineError)
+async def _offline_error(request, exc):
+    """Офлайн-режим: операция, которой нужен DeepSeek, — понятный отказ, а не 500."""
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 # CORS — для веб-сборки мобильного приложения (react-native-web), которая ходит к API
 # с другого origin. Нативные iOS/Android не подчиняются CORS. Приложение авторизуется

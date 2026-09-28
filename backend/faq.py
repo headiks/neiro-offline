@@ -9,6 +9,10 @@ faq.py — заранее готовые ответы: топ-10 вопросо�
 не изменился — модель не зовём. Изменился — ответы faq и model по подэтапу удаляются и
 пишутся заново. Секции: у пересобранного документа новые id секций, поэтому старые ответы
 по исчезнувшим секциям удаляются, а по новым — генерируются.
+
+Офлайн (без DeepSeek) — только удаление устаревшего (например, админ удалил документ);
+новое допишется при следующем выходе в онлайн. Там же обновляется индекс фрагментов
+документов (docindex) — он нужен локальной модели.
 """
 import hashlib
 import json
@@ -16,6 +20,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 import db
+import deepseek
 import qacache
 
 PROMPT_VERSION = "1"
@@ -97,6 +102,8 @@ def refresh_substages() -> dict:
 
     def one(t):
         key, title, ctx, sources, fp = t
+        if ctx and deepseek.offline():
+            return 0                    # состояние не пишем — догенерируется в онлайне
         if ctx:
             items = [{**qa, "substages": [key], "meta": {"sources": [{"source": s} for s in sources]}}
                      for qa in _qa_from(title, ctx, TOP_N)]
@@ -109,6 +116,20 @@ def refresh_substages() -> dict:
     return {"substages": len(todo), "answers": _run(one, todo)}
 
 
+def pending() -> dict:
+    """Что ещё не сгенерировано (без вызова модели) — для scripts/offline_prepare.py."""
+    import planner
+    state = _state()
+    subs = sum(1 for key, _ in _catalog_substages()
+               if (ctx := planner._context_for([key])[0]) and state.get(f"sub:{key}") != _fingerprint(ctx))
+    row = db.query(
+        "SELECT count(*) AS n FROM sections s JOIN section_labels l ON l.section_id = s.id "
+        "WHERE l.is_meaningful AND length(s.text) >= %s AND NOT EXISTS "
+        "(SELECT 1 FROM qa_state q WHERE q.key = 'sec:' || s.id AND q.fingerprint = %s)",
+        (MIN_SECTION_CHARS, _fingerprint("section")), "one") or {}
+    return {"substages": subs, "sections": row.get("n", 0)}
+
+
 def refresh_sections() -> dict:
     """По 2 вопроса на каждую содержательную секцию, для которой их ещё нет."""
     gone = db.query("DELETE FROM qa_answers WHERE source = 'section' AND section_id IS NOT NULL "
@@ -118,6 +139,8 @@ def refresh_sections() -> dict:
     if gone:
         qacache._bump()
     fp = _fingerprint("section")
+    if deepseek.offline():
+        return {"sections": 0, "answers": 0, "removed": len(gone)}
     rows = db.query(
         "SELECT s.id, s.text, s.heading_path, l.substages, d.filename FROM sections s "
         "JOIN section_labels l ON l.section_id = s.id JOIN documents d ON d.id = s.doc_id "
@@ -164,7 +187,9 @@ def refresh() -> dict:
         return {"skipped": "уже идёт"}
     try:
         while True:
-            res = {**refresh_substages(), **refresh_sections(), "reembedded": qacache.reembed_missing()}
+            import docindex
+            res = {**refresh_substages(), **refresh_sections(), "reembedded": qacache.reembed_missing(),
+                   "doc_chunks": docindex.build()}
             print(f"[faq] {res}")
             if r is None or not r.delete("nm:faq:again"):
                 return res

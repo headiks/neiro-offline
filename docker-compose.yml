@@ -14,6 +14,8 @@
 #   db-raw       — исходники: оригиналы документов и загруженные штатки
 #   redis        — очередь задач и общий стейт процессов
 #   embed        — векторы вопросов для базы ответов (bge-m3 на CPU, без интернета)
+#   llm          — локальная модель для офлайн-режима (профиль offline, см. docs/offline.md):
+#                  docker compose --profile offline up -d
 
 name: neiromaster
 
@@ -32,6 +34,7 @@ x-app: &app
     NEIROMASTER_RAW_DB_DSN: postgresql://neiromaster_raw:${POSTGRES_RAW_PASSWORD:-neiromaster_raw}@db-raw:5432/neiromaster_raw
     REDIS_URL: redis://redis:6379/0
     NEIROMASTER_EMBED_URL: http://embed:8080
+    NEIROMASTER_LOCAL_LLM_URL: http://llm:8080
     WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
     NEIROMASTER_DB_POOL: ${NEIROMASTER_DB_POOL:-15}
   volumes:
@@ -88,6 +91,29 @@ services:
       timeout: 5s
       retries: 60
       start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+    networks: [backend]
+
+  # Локальная модель для офлайн-режима (NEIROMASTER_LLM_MODE=offline): отвечает на вопросы,
+  # которых нет в базе готовых ответов. Модель (GGUF) скачивается при первом старте —
+  # запустите профиль, пока есть интернет. Один запрос за раз: CPU не делится, очередь
+  # держит сервер. Модель и потоки — LLM_MODEL / LLM_THREADS в .env.
+  llm:
+    profiles: ["offline"]
+    image: ghcr.io/ggml-org/llama.cpp:server
+    restart: unless-stopped
+    environment:
+      LLAMA_CACHE: /models
+    command: ["-hf", "${LLM_MODEL:-unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M}", "-c", "4096",
+              "--parallel", "1", "-t", "${LLM_THREADS:-4}", "--host", "0.0.0.0", "--port", "8080"]
+    volumes: [models-llm:/models]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 60s
     security_opt: ["no-new-privileges:true"]
     logging: *logging
     networks: [backend]

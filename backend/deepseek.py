@@ -15,8 +15,14 @@ docpipe/llm.py: детерминированный вывод (temperature=0), �
 цепочку рассуждений и не отдаёт объёмный структурированный JSON (пустой/обрезанный
 ответ), а json-режим не поддерживает. Для нашей разметки/генерации нужен именно
 компактный строгий JSON — его даёт deepseek-chat.
+
+Офлайн-режим (NEIROMASTER_LLM_MODE=offline): все вызовы идут в локальную модель —
+llama.cpp-сервер (служба llm, NEIROMASTER_LOCAL_LLM_URL) с тем же OpenAI-совместимым API.
+Тяжёлые операции (разбор документов, генерация планов и частых вопросов) в офлайне
+запрещены — require_online(): слабый CPU делал бы их часами и хуже DeepSeek.
 """
 import os
+import re
 import time
 
 import requests
@@ -34,10 +40,30 @@ MAX_RETRIES = int(os.environ.get("DEEPSEEK_MAX_RETRIES", "3"))
 _RETRYABLE = (requests.exceptions.Timeout, requests.exceptions.ConnectionError,
               requests.exceptions.SSLError)
 
+LOCAL_TIMEOUT = int(os.environ.get("NEIROMASTER_LOCAL_LLM_TIMEOUT", "150"))
+
+
+class OfflineError(RuntimeError):
+    """Операция требует DeepSeek, а сервер работает без интернета."""
+
+
+def offline() -> bool:
+    return os.environ.get("NEIROMASTER_LLM_MODE", "online").strip().lower() == "offline"
+
+
+def require_online(what: str):
+    if offline():
+        raise OfflineError(f"{what} — только в онлайн-режиме: подключите интернет и "
+                           "переключите NEIROMASTER_LLM_MODE=online (см. docs/offline.md)")
+
+
+def local_url() -> str:
+    return os.environ.get("NEIROMASTER_LOCAL_LLM_URL", "http://llm:8080").strip().rstrip("/")
+
 
 def chat(system: str, user: str, *, json_mode: bool = False, model: str = None,
          temperature: float = 0.0, max_tokens: int = 8192, timeout: int = None,
-         retries: int = None) -> str:
+         retries: int = None, target: str = None) -> str:
     """Один запрос к DeepSeek, возвращает message.content.
 
     json_mode=True — response_format=json_object (строгий JSON без ```-заборов).
@@ -46,6 +72,11 @@ def chat(system: str, user: str, *, json_mode: bool = False, model: str = None,
     """
     # ВАЖНО: ключ/URL/модель читаем в момент ВЫЗОВА, а не импорта. Иначе, если модуль
     # импортируется до того, как config загрузит .env, ключ был бы пустым навсегда.
+    # target: "local" / "deepseek"; по умолчанию — по режиму. Замер качества офлайна
+    # (scripts/offline_eval.py) отвечает локально, а оценивает ответы DeepSeek.
+    if (target or ("local" if offline() else "deepseek")) == "local":
+        return _chat_local(system, user, json_mode=json_mode, temperature=temperature,
+                           max_tokens=max_tokens, timeout=timeout)
     api_key = os.environ.get("DEEPSEEK_API_KEY", "") or API_KEY
     base_url = (os.environ.get("DEEPSEEK_BASE_URL") or BASE_URL).rstrip("/")
     use_model = model or os.environ.get("DEEPSEEK_MODEL") or MODEL
@@ -108,6 +139,32 @@ def chat(system: str, user: str, *, json_mode: bool = False, model: str = None,
         raise RuntimeError("DeepSeek: пустой ответ модели.")
     # Ответ в JSON: значения возвращаем JSON-экранированными (кавычки в названиях и т.п.).
     return masker.unmask(content, json_safe=json_mode or pii.looks_like_json(content))
+
+
+def _chat_local(system: str, user: str, *, json_mode: bool, temperature: float,
+                max_tokens: int, timeout: int = None) -> str:
+    """Локальная модель: данные не покидают сервер, маскировать ПДн не нужно. Один
+    параллельный слот на сервере (--parallel 1) — очередь держит сам llama.cpp."""
+    body = {"model": "local", "stream": False, "temperature": temperature,
+            "max_tokens": min(max_tokens, int(os.environ.get("NEIROMASTER_LOCAL_MAX_TOKENS", "400"))),
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    try:
+        r = requests.post(f"{local_url()}/v1/chat/completions", json=body,
+                          timeout=timeout or LOCAL_TIMEOUT)
+    except _RETRYABLE as e:
+        raise RuntimeError(f"Локальная модель недоступна: {e}")
+    if r.status_code >= 400:
+        raise RuntimeError(f"Локальная модель {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    _record_usage("local", data.get("usage") or {})
+    content = ((data["choices"][0].get("message") or {}).get("content") or "")
+    # Модели с «рассуждением» (Qwen3) пишут его в <think>…</think> — сотруднику не нужно.
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.S).strip()
+    if not content:
+        raise RuntimeError("Локальная модель: пустой ответ.")
+    return content
 
 
 def _record_usage(model: str, usage: dict):
