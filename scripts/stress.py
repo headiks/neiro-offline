@@ -317,6 +317,11 @@ def main():
     ARGS = ap.parse_args()
     only = set(filter(None, ARGS.only.split(",")))
     want = lambda s: not only or s in only  # noqa: E731
+    # Второй параллельный прогон удалил бы сотрудников первого — оба сломаны.
+    from redis_conn import get_redis
+    lock = get_redis().lock("nm:stress:lock", timeout=3 * 3600, blocking=False)
+    if not lock.acquire():
+        raise SystemExit("Стресс-тест уже идёт — второй запуск отменён.")
     cleanup()                                    # хвосты прошлого прогона
     ids, tokens = setup(ARGS.users)
     REPORT["meta"] = {"target": ARGS.target, "users": ARGS.users, "cpus": os.cpu_count(),
@@ -336,6 +341,7 @@ def main():
             scenario_mix(ids, tokens)
     finally:
         cleanup()
+        lock.release()
         print("\nREPORT_JSON " + json.dumps(REPORT, ensure_ascii=False), flush=True)
 
 
