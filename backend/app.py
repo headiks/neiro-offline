@@ -31,6 +31,7 @@ import indexing
 import documents
 import docregistry
 import questions
+import qacache
 import messaging
 import activitylog
 import security
@@ -150,6 +151,7 @@ async def lifespan(app: FastAPI):
         pii_key.ensure()
         docregistry.init()
         questions.init()
+        qacache.init()                       # база готовых ответов (после ключа ПДн)
         _step("реестр документов", documents.init)
         _step("посев структуры знаний", _seed_knowledge)
         _step("пайплайн разметки docpipe", _init_docpipe)

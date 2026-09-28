@@ -69,6 +69,11 @@ def run_generation(job_id: str, plan: dict, profs: list, only_missing: bool):
     planner._run_generation(job_id, plan, profs, only_missing)
 
 
+def run_faq_refresh():
+    import faq
+    return faq.refresh()
+
+
 def run_selftest(seconds: float = 2.0, tag: str = ""):
     """Безвредная тест-задача для страницы проверки очередей: подождать и вернуть,
     какой worker её выполнил. Не трогает БД/DeepSeek — только показывает, что цепочка
@@ -96,6 +101,10 @@ def enqueue_reanalyze_all(job_id: str) -> bool:
 
 def enqueue_reanalyze_document(filename: str) -> bool:
     return _run_or_thread(_queue(), run_reanalyze_document, filename)
+
+
+def enqueue_faq_refresh() -> bool:
+    return _run_or_thread(_queue(), run_faq_refresh, job_timeout=REANALYZE_ALL_TIMEOUT)
 
 
 def enqueue_generation(job_id: str, plan: dict, profs: list, only_missing: bool) -> bool:
