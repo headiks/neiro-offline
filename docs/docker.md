@@ -50,7 +50,7 @@ docker compose logs web | grep -A3 "главного администратор�
 | `SITE_ADDRESS` | `localhost` | домен (сертификат Let's Encrypt, нужен интернет) или IP (внутренний CA) |
 | `POSTGRES_PROCESSED_PASSWORD`, `POSTGRES_RAW_PASSWORD` | `neiromaster`, `neiromaster_raw` | пароли БД. **Задайте до первого запуска** — потом их меняют через `ALTER USER` |
 | `NEIROMASTER_ADMIN_PASSWORD` | сгенерируется | начальный пароль владельца, от 8 символов |
-| `WEB_CONCURRENCY`, `NEIROMASTER_RQ_WORKERS`, `NEIROMASTER_DB_POOL` | по железу | процессов web, RQ-воркеров, пул БД. Сервер считает сам по ядрам и памяти (`backend/sizing.py`, итог — в логе `[sizing]`); задавайте, только чтобы переопределить |
+| `WEB_CONCURRENCY`, `NEIROMASTER_RQ_WORKERS`, `NEIROMASTER_DB_POOL`, `NEIROMASTER_PUSH_WORKERS` | по железу | процессов web, RQ-воркеров, пул БД, потоков отправки пушей. Сервер считает сам по ядрам и памяти (`backend/sizing.py`, итог — в логе `[sizing]`); задавайте, только чтобы переопределить |
 | `HTTP_PORT`, `HTTPS_PORT` | `80`, `443` | порты на хосте |
 
 БД и Redis наружу не публикуются — доступны только контейнерам приложения.

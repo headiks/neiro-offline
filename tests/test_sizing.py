@@ -30,3 +30,8 @@ def test_offline_reserves_llm_memory(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("NEIROMASTER_LLM_MODE", "offline")
     assert (sizing.web_workers(4, 7.7), sizing.rq_workers(4, 7.7)) == (3, 1)
+def test_push_workers(monkeypatch):
+    monkeypatch.delenv("NEIROMASTER_PUSH_WORKERS", raising=False)
+    assert (sizing.push_workers(1), sizing.push_workers(4), sizing.push_workers(32)) == (12, 48, 100)
+    monkeypatch.setenv("NEIROMASTER_PUSH_WORKERS", "5")
+    assert sizing.push_workers(4) == 5

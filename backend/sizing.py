@@ -78,9 +78,15 @@ def db_pool(cpu: int = None, mem: float = None) -> int:
     return _env("NEIROMASTER_DB_POOL") or max(5, min(20, int(PG_MAX_CONNECTIONS * 0.8) // procs))
 
 
+def push_workers(cpu: int = None) -> int:
+    """Потоки отправки пушей: почти всё время ждут ответа FCM (~0,3 с), CPU тратят мало —
+    по 12 на ядро, от 10 до 100 (память на поток — единицы МБ)."""
+    return _env("NEIROMASTER_PUSH_WORKERS") or max(10, min(100, (cpu or cpus()) * 12))
+
+
 def summary() -> str:
     return (f"{cpus()} ядер, {mem_gb():.1f} ГБ -> web-процессов {web_workers()}, "
-            f"RQ-воркеров {rq_workers()}, пул БД {db_pool()} на процесс")
+            f"RQ-воркеров {rq_workers()}, пул БД {db_pool()} на процесс, потоков пушей {push_workers()}")
 
 
 if __name__ == "__main__":
