@@ -137,7 +137,18 @@ export function applyAnswer(m: Msg, key: string, value: string | null): Answers 
   if (value === null) a[key] = !a[key];
   else {
     if (m.payload?.type === "quiz" && a[key]) return null;
-    a[key] = value;
+    const q = isQuestions(m.payload) ? m.payload.questions.find((x) => x.id === key) : undefined;
+    // Несколько вариантов: повторное нажатие снимает выбор, ответ — id через запятую.
+    a[key] = q?.type === "multi" ? toggleId(String(a[key] || ""), value) : value;
   }
   return a;
 }
+
+/** «o1,o3» + «o3» -> «o1»; + «o2» -> «o1,o3,o2». */
+export function toggleId(list: string, id: string): string {
+  const ids = list.split(",").filter(Boolean);
+  return (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]).join(",");
+}
+
+/** Выбран ли вариант (у мультивыбора ответ — id через запятую). */
+export const isPicked = (answer: unknown, id: string) => String(answer || "").split(",").includes(id);

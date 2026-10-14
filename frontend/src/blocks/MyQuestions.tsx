@@ -1,6 +1,6 @@
 // «Мои вопросы специалисту»: вопрос, статус (Ждёт ответа / Отвечено), ответ.
 import { MessageCircleQuestion } from 'lucide-react';
-import { QUESTION_STATUS } from '@shared/status';
+import { ADDRESSEE, QUESTION_STATUS } from '@shared/status';
 import { ago } from '@shared/format';
 import { useCabinet } from '../lib/cabinet';
 import { Card, Empty, Spinner, StatusBadge } from '../ui';
@@ -16,7 +16,7 @@ export function MyQuestions() {
       {questions.map((q) => (
         <div className="nm-qcard" key={q.id}>
           <div className="nm-row-between">
-            <div className="nm-qcard-q nm-grow">{q.question}</div>
+            <div className="nm-qcard-q nm-grow">{q.addressee && ADDRESSEE[q.addressee] ? `${ADDRESSEE[q.addressee].to}: ` : ''}{q.question}</div>
             <StatusBadge view={QUESTION_STATUS[q.status] || QUESTION_STATUS.open} />
           </div>
           {q.status === 'resolved' && q.answer ? <div className="nm-qcard-a nm-pre">{q.answer}</div>

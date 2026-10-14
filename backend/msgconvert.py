@@ -16,7 +16,7 @@
       ],
       "checklist": [str],      # для чек-листа
       "outro": str,            # краткое завершение / к кому обратиться
-      "hr_note": str           # "Уточнить у HR: ..." или "" — только для админки
+      "hr_note": str           # "Уточнить в отделе кадров: ..." или "" — только для админки
     }
 
 Отсюда бэкенд конвертирует его в нужный интерактивный формат: опрос (survey),
@@ -47,6 +47,136 @@ def _list(value) -> list:
     return value if isinstance(value, list) else []
 
 
+# ---------- Читаемость текста (без модели) ----------
+# Модель иногда отдаёт markdown-таблицу, перечень «1) … 2) …» в одну строку, «простыню» без
+# абзацев и жаргон. Чиним детерминированно — и новые, и уже сохранённые сообщения
+# (planner.rerender_saved_texts), без повторной генерации. Все шаги идемпотентны.
+_TABLE_ROW = re.compile(r"^\s*\|(.+)\|\s*$")
+_ENUM_ITEM = re.compile(r"(?:^|(?<=\s))(\d{1,2})\)\s")
+_SENT_END = re.compile(r"(?:(?<=\w\w\w[.!?…])|(?<=[»)][.!?…]))\s+(?=[«\"(А-ЯЁA-Z])")
+PARA_MAX = 420          # длиннее — режем абзац по предложениям
+
+
+def _is_table_sep(line: str) -> bool:
+    return "|" in line and "--" in line and re.fullmatch(r"[\s|:\-]+", line) is not None
+
+
+def _untable(text: str) -> str:
+    """Markdown-таблица -> строки «• ячейка — ячейка»: палочки в приложении нечитаемы.
+    Шапку (строка перед разделителем «|---|») выбрасываем — строки понятны и без неё."""
+    lines, out = text.split("\n"), []
+    for i, line in enumerate(lines):
+        if _is_table_sep(line):
+            continue
+        m = _TABLE_ROW.match(line)
+        if not m:
+            out.append(line)
+        elif not (i + 1 < len(lines) and _is_table_sep(lines[i + 1])):
+            cells = [c.strip() for c in m.group(1).split("|") if c.strip()]
+            if cells:
+                out.append("• " + " — ".join(cells))
+    return "\n".join(out)
+
+
+def _split_enums(line: str) -> str:
+    """«Порядок: 1) остановите станок; 2) позовите…» -> каждый пункт с новой строки."""
+    nums = _ENUM_ITEM.findall(line)
+    if len(nums) < 2 or nums[:2] != ["1", "2"]:
+        return line
+    return re.sub(r"\s+(?=\d{1,2}\)\s)", "\n", line)
+
+
+def _paragraphs(line: str) -> str:
+    """Абзац длиннее PARA_MAX -> абзацы по 2–3 предложения (сплошной текст тяжело читать)."""
+    if len(line) <= PARA_MAX or line.lstrip().startswith(("•", "☐", "-")):
+        return line
+    out, buf = [], ""
+    for sent in _SENT_END.split(line.strip()):
+        if buf and len(buf) + len(sent) > PARA_MAX * 0.7:
+            out.append(buf)
+            buf = sent
+        else:
+            buf = f"{buf} {sent}".strip()
+    if buf:
+        out.append(buf)
+    return "\n\n".join(out)
+
+
+def _cap(src: str, repl: str) -> str:
+    return repl[:1].upper() + repl[1:] if src[:1].isupper() else repl
+
+
+_SHTATKA = {"а": "штатное расписание", "у": "штатное расписание", "и": "штатного расписания",
+            "е": "штатном расписании", "ой": "штатным расписанием"}
+# «должностная» как существительное: дальше знак препинания, конец или предлог — не «должностная инструкция».
+_NOUN_END = r"(?=\s*(?:[.,;:!?)»—–]|$)|\s+(?:и|или|по|в|на|с|к|у|до|для|при)\b)"
+
+
+def _dolzh(m) -> str:
+    end = m.group(1).lower()
+    if end == "ая":
+        r = "должностная инструкция"
+    elif end == "ую":
+        r = "должностную инструкцию"
+    else:
+        prev = m.string[max(0, m.start() - 4):m.start()].lower()
+        r = "должностной инструкцией" if re.search(r"(?:^|\s)со?\s$", prev) else "должностной инструкции"
+    return _cap(m.group(0), r)
+
+
+# (regex, замена) — жаргон и англицизмы -> термины, которые ждёт заказчик.
+_GLOSSARY = (
+    (re.compile(r"\b[Шш]татк(а|у|и|е|ой)\b"), lambda m: _cap(m.group(0), _SHTATKA[m.group(1)])),
+    (re.compile(r"\b[Дд]олжностн(ая|ую|ой)\b" + _NOUN_END), _dolzh),
+    (re.compile(r"\b[Пп]од наставником\b"), lambda m: _cap(m.group(0), "под руководством наставника")),
+    (re.compile(r"\b[Уу] HR\b"), lambda m: _cap(m.group(0), "в отделе кадров")),
+    (re.compile(r"\b[КкВв] HR\b"), lambda m: _cap(m.group(0), "в отдел кадров")),
+    (re.compile(r"\b[Сс] HR\b"), lambda m: _cap(m.group(0), "с отделом кадров")),
+    (re.compile(r"\bHR-специалист(\w*)"), lambda m: f"специалист{m.group(1)} по персоналу"),
+    (re.compile(r"\bHR\b"), lambda m: "отдел кадров"),
+)
+
+
+def tidy(text: str) -> str:
+    """Текст для сотрудника: без таблиц из палочек, перечни столбиком, абзацы, без жаргона."""
+    text = _s(text)
+    if not text:
+        return text
+    lines = _untable(text).split("\n")
+    text = "\n".join(_paragraphs(part) for line in lines for part in _split_enums(line).split("\n"))
+    for rx, repl in _GLOSSARY:
+        text = rx.sub(repl, text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+# ---------- Кому обратиться: кнопки «Написать наставнику» и т.п. ----------
+_CONTACT_VERB = re.compile(
+    r"(?i)\b(?:обратит|обращайт|обратиться|напишите|написать|пишите|позвоните|позвонить|сообщите|"
+    r"сообщить|сообщайте|спросите|спросить|свяжитесь|связаться|уточните|уточнить|подойдите|"
+    r"подойти|скажите|задайте|задать|позовите|начните с|к кому)"
+    r"|вопрос\w*[^.!?\n]*?[—–-]\s*(?:к|в)\s")                # «вопросы по комплекту — к мастеру»
+_ROLES = (
+    ("mentor", re.compile(r"(?i)\bнаставни(?:к|ка|ку|ком|ке)\b"), "Написать наставнику"),
+    ("manager", re.compile(r"(?i)\bруководител[ьяюеи]\w*|\bмастер\w*\s+участка"), "Написать руководителю"),
+    ("hr", re.compile(r"(?i)\bотдел\w*\s+кадров|\bспециалист\w*\s+по\s+персоналу|\bHR\b"), "Написать в отдел кадров"),
+)
+
+
+def contact_roles(text: str) -> list:
+    """Роли, к которым сотруднику предлагают обратиться. Роль считается, только если она в одном
+    предложении с призывом обратиться: «практика под руководством наставника» кнопку не даёт."""
+    found = set()
+    for sent in re.split(r"(?<=[.!?…])\s+|\n+", text or ""):
+        if _CONTACT_VERB.search(sent):
+            found |= {role for role, rx, _ in _ROLES if rx.search(sent)}
+    return [role for role, _, _ in _ROLES if role in found]
+
+
+def contacts(text: str) -> list:
+    labels = {role: label for role, _, label in _ROLES}
+    return [{"role": r, "label": labels[r]} for r in contact_roles(text)]
+
+
 def _stems(text: str) -> set:
     """Значимые слова по основе (первые 5 букв): «помогу/помогаю», «вопросы/вопросами» совпадут."""
     return {w[:5] for w in re.findall(r"[а-яёa-z0-9]+", text.lower().replace("ё", "е")) if len(w) > 3}
@@ -66,11 +196,29 @@ def fresh_points(text: str, points) -> list:
     return out
 
 
+def _clean(content: dict) -> dict:
+    """Копия envelope, где всё, что видит сотрудник, прошло tidy()."""
+    c = dict(content or {})
+    for k in ("intro", "body", "outro"):
+        c[k] = tidy(c.get(k))
+    for k in ("key_points", "checklist"):
+        c[k] = [tidy(p) for p in _list(c.get(k))]
+    qs = []
+    for q in _list(c.get("questions")):
+        if isinstance(q, dict):
+            q = {**q, "text": tidy(q.get("text")), "explanation": tidy(q.get("explanation")),
+                 "options": [{**o, "text": tidy(o.get("text"))} if isinstance(o, dict) else tidy(o)
+                             for o in _list(q.get("options"))]}
+        qs.append(q)
+    c["questions"] = qs
+    return c
+
+
 def to_text(content: dict) -> str:
     """Собирает текст сообщения ДЛЯ СОТРУДНИКА из унифицированного envelope.
     Порядок: обвязка -> основной текст -> новые факты списком -> чек-лист -> завершение.
     hr_note — служебная пометка для HR, сотруднику не показывается (админка — отдельно)."""
-    c = content or {}
+    c = _clean(content)
     parts = [_s(c.get(k)) for k in ("intro", "body") if _s(c.get(k))]
     points = fresh_points("\n".join(parts), c.get("key_points"))
     if points:
@@ -106,6 +254,8 @@ def _questions(content: dict) -> list:
             continue
         opts = _norm_options(q.get("options"))
         qtype = _s(q.get("type")) or ("open" if not opts else "single")
+        if qtype == "bool" and not opts:          # «да/нет» — кнопками, а не пустым вопросом
+            opts = _norm_options(["Да", "Нет"])
         out.append({
             "id": f"q{i}", "text": text, "type": qtype,
             "options": opts, "explanation": _s(q.get("explanation")),
@@ -123,7 +273,10 @@ def to_survey(content: dict) -> dict:
     questions = [{
         "id": q["id"], "text": q["text"],
         "type": q["type"] if q["type"] in ("single", "multi", "open") else "single",
-        "options": [{"id": o["id"], "text": o["text"]} for o in q["options"]],
+        # Вариант «Написать наставнику» — ещё и кнопка связи: открывает письмо этой роли.
+        "options": [{"id": o["id"], "text": o["text"],
+                     **({"contact": r[0]} if (r := contact_roles(o["text"])) else {})}
+                    for o in q["options"]],
     } for q in _questions(content)]
     return {"type": "survey", "title": _s((content or {}).get("title")),
             "intro": _s((content or {}).get("intro")) or to_text(content),
@@ -159,9 +312,15 @@ _CONVERTERS = {"survey": to_survey, "quiz": to_quiz,
 
 
 def convert(content: dict, kind: str) -> dict:
-    """Конвертирует унифицированное сообщение в формат под тип подэтапа (kind)."""
+    """Конвертирует унифицированное сообщение в формат под тип подэтапа (kind).
+    contacts — к кому текст предлагает обратиться: под сообщением кнопки «Написать …»."""
     fmt = KIND_TO_FORMAT.get(kind, "message")
-    return _CONVERTERS[fmt](content)
+    c = _clean(content)
+    out = _CONVERTERS[fmt](c)
+    found = contacts(to_text(c))
+    if found:
+        out["contacts"] = found
+    return out
 
 
 def _demo():

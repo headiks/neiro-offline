@@ -4,7 +4,7 @@
 import React, { useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { QUESTION_STATUS } from "../../../shared/status";
+import { ADDRESSEE, QUESTION_STATUS } from "../../../shared/status";
 import { ago } from "../../../shared/format";
 import { SUGGESTIONS } from "../api";
 import { useData, type Turn } from "../data";
@@ -75,7 +75,7 @@ function MyQuestions() {
       {questions.map((q) => (
         <GlassCard key={q.id}>
           <View style={{ flexDirection: "row", gap: S.sm, justifyContent: "space-between", alignItems: "flex-start" }}>
-            <Txt w="600" style={{ flex: 1 }}>{q.question}</Txt>
+            <Txt w="600" style={{ flex: 1 }}>{q.addressee && ADDRESSEE[q.addressee] ? `${ADDRESSEE[q.addressee].to}: ` : ""}{q.question}</Txt>
             <Badge tone={(QUESTION_STATUS[q.status] || QUESTION_STATUS.open).tone}>{(QUESTION_STATUS[q.status] || QUESTION_STATUS.open).label}</Badge>
           </View>
           {q.status === "resolved" && q.answer ? <Txt v="small" color={c.muted}>{q.answer}</Txt> : <Txt v="micro" color={c.muted}>Задан {ago(q.created_at)}</Txt>}

@@ -40,9 +40,12 @@ export const msgDay = (m: Msg) => { const d = msgDate(m); return d ? ymd(d) : ""
 export const msgTime = (m: Msg) => hhmmOf(msgDate(m));
 export const msgTs = (m: Msg) => msgDate(m)?.getTime() || 0;
 
-/** Старые сверху, новые снизу — как в мессенджере. */
+/** Старые сверху, новые снизу — как в мессенджере. Внутри дня — строго по плану (время
+ *  по плану, затем порядок этапа и подэтапа): пачка, доставленная разом, шла вперемешку. */
 export function oldestFirst(list: Msg[]): Msg[] {
-  return list.slice().sort((a, b) => msgTs(a) - msgTs(b));
+  const planTs = (m: Msg) => parseDate(m.send_at)?.getTime() || 0;
+  return list.slice().sort((a, b) => msgDay(a).localeCompare(msgDay(b))
+    || planTs(a) - planTs(b) || (a.seq ?? 0) - (b.seq ?? 0) || msgTs(a) - msgTs(b));
 }
 
 /** Заголовок сообщения «Этап — Подэтап» -> kicker «Этап · Подэтап». */

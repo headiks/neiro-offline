@@ -113,6 +113,7 @@ export type AdminQuestion = {
   resolved_question?: string | null;
   reason?: string;
   risk_type?: string | null;
+  addressee?: string | null;      // написан кнопкой «Написать наставнику» и т.п. (mentor | manager | hr)
   status: 'open' | 'resolved';
   answer?: string | null;
   answered_by?: string | null;

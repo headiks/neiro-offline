@@ -22,13 +22,18 @@ export type Me = {
 
 // ---- Сообщения плана (инбокс) ----
 export type ChecklistItem = { id: string; text: string };
-export type QuizOption = { id: string; text: string; correct?: boolean };
-export type QuizQuestion = { id: string; text: string; options?: QuizOption[]; explanation?: string };
+/** Кому сотрудник может написать из сообщения: наставнику, руководителю, в отдел кадров. */
+export type ContactRole = "mentor" | "manager" | "hr";
+export type Contact = { role: ContactRole; label: string };
+// contact — вариант опроса «Написать наставнику» заодно открывает письмо этой роли.
+export type QuizOption = { id: string; text: string; correct?: boolean; contact?: ContactRole };
+// type: single | multi (несколько вариантов, ответ — id через запятую) | open (свой текст)
+export type QuizQuestion = { id: string; text: string; type?: string; options?: QuizOption[]; explanation?: string };
 
 export type Payload =
-  | { type: "checklist"; intro?: string; items: ChecklistItem[] }
-  | { type: "survey" | "quiz"; intro?: string; questions: QuizQuestion[] }
-  | { type?: string; intro?: string; [k: string]: unknown };
+  | { type: "checklist"; intro?: string; items: ChecklistItem[]; contacts?: Contact[] }
+  | { type: "survey" | "quiz"; intro?: string; questions: QuizQuestion[]; contacts?: Contact[] }
+  | { type?: string; intro?: string; contacts?: Contact[]; [k: string]: unknown };
 
 export type Answers = Record<string, string | boolean>;
 
@@ -44,6 +49,7 @@ export type Msg = {
   delivered_at?: string | null;
   read_at?: string | null;
   status?: string;                // delivered | read
+  seq?: number | null;            // позиция в плане: порядок сообщений одного времени
 };
 
 export type Inbox = { messages: Msg[]; unread: number };
@@ -60,6 +66,7 @@ export type MyQuestion = {
   answered_at?: string | null;
   reason?: string;
   risk_type?: string | null;
+  addressee?: ContactRole | null;   // вопрос, написанный кнопкой «Написать наставнику» и т.п.
 };
 
 // ---- Свой план адаптации ----

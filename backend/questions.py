@@ -31,6 +31,9 @@ QUESTIONS_PATH = DATA_DIR / "pending_questions.json"
 
 REASON_ESCALATE = "escalate"    # ЧС / риск — приоритетный разбор
 REASON_NO_ANSWER = "no_answer"  # в регламентах ответа не нашлось
+REASON_DIRECT = "direct"        # сотрудник сам написал (кнопка «Написать наставнику» у сообщения)
+# Кому адресован прямой вопрос — подпись для администратора, который его передаст.
+ADDRESSEES = {"mentor": "наставнику", "manager": "руководителю", "hr": "в отдел кадров"}
 
 STATUS_OPEN = "open"
 STATUS_RESOLVED = "resolved"
@@ -63,7 +66,7 @@ CREATE_INDEXES = (
 )
 _COLUMNS = ("id", "created_at", "user_id", "user_name", "position", "department", "contact",
             "mentor", "question", "resolved_question", "reason", "risk_type", "status",
-            "answer", "answered_by", "answered_at")
+            "answer", "answered_by", "answered_at", "addressee")
 _ENCRYPTED = ("user_name", "contact", "mentor", "question", "resolved_question", "answer")
 
 
@@ -85,7 +88,7 @@ def _insert(entry: dict):
 
 
 def record(user: dict, question: str, resolved_question: Optional[str],
-           reason: str, risk_type: Optional[str] = None) -> dict:
+           reason: str, risk_type: Optional[str] = None, addressee: Optional[str] = None) -> dict:
     """Ставит вопрос сотрудника в очередь администратору. Возвращает созданную запись."""
     user = user or {}
     entry = {
@@ -99,12 +102,13 @@ def record(user: dict, question: str, resolved_question: Optional[str],
         "mentor": user.get("mentor") or "",
         "question": question,
         "resolved_question": resolved_question or None,
-        "reason": reason if reason in (REASON_ESCALATE, REASON_NO_ANSWER) else REASON_NO_ANSWER,
+        "reason": reason if reason in (REASON_ESCALATE, REASON_NO_ANSWER, REASON_DIRECT) else REASON_NO_ANSWER,
         "risk_type": risk_type or None,
         "status": STATUS_OPEN,
         "answer": None,
         "answered_by": None,
         "answered_at": None,
+        "addressee": addressee if addressee in ADDRESSEES else None,
     }
     _insert(entry)
     return dict(entry)
@@ -151,6 +155,7 @@ def count_open() -> int:
 
 def init():
     db.execute(CREATE_TABLE)
+    db.execute("ALTER TABLE questions ADD COLUMN IF NOT EXISTS addressee TEXT")
     for stmt in CREATE_INDEXES:
         db.execute(stmt)
 

@@ -62,7 +62,7 @@ function Staffing({ onDone }: { onDone: () => void }) {
   };
   const fresh = rows.filter((r) => !r.exists && !r.foreign).length;
   const create = async () => {
-    if (!rows.length || !(await confirm({ title: 'Создать записи из штатки?', text: `Строк: ${rows.length}. Уже заведённые будут пропущены.`, ok: 'Создать' }))) return;
+    if (!rows.length || !(await confirm({ title: 'Создать записи из штатного расписания?', text: `Строк: ${rows.length}. Уже заведённые будут пропущены.`, ok: 'Создать' }))) return;
     setBusy(true);
     try {
       const d = await api.post<{ profiles: { id: string }[]; vacancies: unknown[]; skipped: { full_name: string; reason: string }[] }>(
@@ -84,12 +84,12 @@ function Staffing({ onDone }: { onDone: () => void }) {
     <Card>
       <div className="nm-card-title" style={{ fontSize: 18 }}>Штатное расписание</div>
       <p className="nm-small nm-muted" style={{ margin: 0 }}>
-        Загрузите штатку (xlsx, xls, csv) — ИИ сам определит структуру. Строки с ФИО станут профилями сотрудников
+        Загрузите штатное расписание (xlsx, xls, csv) — ИИ сам определит структуру. Строки с ФИО станут профилями сотрудников
         (логин из фамилии и инициалов, пароль), строки без ФИО — вакансиями. Уже заведённые люди и вакансии пропускаются.
       </p>
       <div data-tour="staffing-drop">
         <Dropzone accept=".xlsx,.xls,.csv,.tsv" icon={FileSpreadsheet} onFiles={(f) => preview(f[0])} disabled={busy}
-                  title="Перетащите штатку сюда или нажмите, чтобы выбрать" hint="Форматы .xlsx, .xls, .csv" />
+                  title="Перетащите штатное расписание сюда или нажмите, чтобы выбрать" hint="Форматы .xlsx, .xls, .csv" />
       </div>
       {status && <Callout tone={status.tone} icon={busy ? undefined : status.tone === 'danger' ? TriangleAlert : undefined}>
         {busy && <span className="nm-spin" aria-hidden style={{ marginRight: 8, verticalAlign: '-4px' }} />}{status.text}</Callout>}
@@ -198,8 +198,8 @@ function UserDialog({ open, user, users, plans, readyProfs, defaultPlanId, onClo
           <Field label="Логин" help="Создаётся один раз из фамилии и инициалов и не меняется. Пароль выдаётся автоматически и виден в списке, пока сотрудник не задаст свой.">
             <Input value={user?.username || ''} disabled placeholder="создастся из ФИО" />
           </Field>
-          <Field label="Должность" help="Выбор из штатки или введите свою. ✓ — для должности уже сгенерированы сообщения плана.">
-            <Combobox value={f.position} onChange={set('position')} options={positions} free placeholder="Выбор из штатки или своя"
+          <Field label="Должность" help="Выбор из штатного расписания или введите свою. ✓ — для должности уже сгенерированы сообщения плана.">
+            <Combobox value={f.position} onChange={set('position')} options={positions} free placeholder="Из штатного расписания или своя"
                       marked={ready} markTitle="Сообщения плана готовы" onDelete={deleteProf} />
           </Field>
           <Field label="Подразделение" help={isOwner ? 'Справочник строится из штатного расписания. Новое подразделение можно добавить, набрав название.' : 'Подразделение меняет суперадмин'}>

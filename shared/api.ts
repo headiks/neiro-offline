@@ -1,6 +1,6 @@
 // API сотрудника — один клиент для сайта и приложения. Отличается только транспорт:
 // сайт ходит со своего origin по сессионной куке, приложение — на API_BASE с Bearer-токеном.
-import type { AskResult, Inbox, LoginResult, Me, MyQuestion, MySchedule, Answers } from "./types";
+import type { AskResult, Inbox, LoginResult, Me, MyQuestion, MySchedule, Answers, ContactRole } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -78,6 +78,8 @@ export function createClient(t: Transport) {
     mySchedule: () => request<MySchedule>("/api/my/schedule"),
     myMessages: () => request<Inbox>("/api/my/messages"),
     myQuestions: () => request<{ questions: MyQuestion[] }>("/api/my/questions"),
+    askPerson: (to: ContactRole, text: string) =>
+      request<{ question: MyQuestion }>("/api/my/questions", { method: "POST", json: { to, text } }),
     markRead: (id: string) => request(`/api/my/messages/${enc(id)}/read`, { method: "POST", json: {} }),
     answer: (id: string, answers: Answers) =>
       request(`/api/my/messages/${enc(id)}/answer`, { method: "POST", json: { answers } }),

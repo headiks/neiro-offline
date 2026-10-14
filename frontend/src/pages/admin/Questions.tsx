@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CircleCheck, Link2, MessageCircleQuestion, RefreshCw, SendHorizontal, Siren } from 'lucide-react';
 import { ago, initials, ruDateTime } from '@shared/format';
-import { QUESTION_STATUS } from '@shared/status';
+import { ADDRESSEE, QUESTION_STATUS } from '@shared/status';
 import { api, enc, messageOf } from '../../lib/api';
 import { usePolling } from '../../lib/poll';
 import { useToast } from '../../lib/toast';
@@ -22,8 +22,8 @@ function AnswerPanel({ q, onDone }: { q: AdminQuestion; onDone: () => void }) {
   const [baseQuestion, setBaseQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
-  // Ответ на ЧС — про конкретный случай, в общую базу по умолчанию не кладём.
-  useEffect(() => { setAnswer(''); setToBase(!isSos(q)); setBaseQuestion(q.resolved_question || q.question); }, [q.id]);
+  // Ответ на ЧС и личное письмо наставнику — про конкретный случай, в общую базу по умолчанию не кладём.
+  useEffect(() => { setAnswer(''); setToBase(!isSos(q) && !q.addressee); setBaseQuestion(q.resolved_question || q.question); }, [q.id]);
   const send = async () => {
     if (!answer.trim()) return;
     setBusy(true);
@@ -46,7 +46,9 @@ function AnswerPanel({ q, onDone }: { q: AdminQuestion; onDone: () => void }) {
       </div>
       <h2>{q.question}</h2>
       <div className="nm-context" data-tone={isSos(q) ? 'danger' : undefined}>
-        {isSos(q) ? 'Похоже на чрезвычайную ситуацию — ответьте как можно скорее и при необходимости свяжитесь с сотрудником.' : 'В документах ответа не нашлось.'}
+        {isSos(q) ? 'Похоже на чрезвычайную ситуацию — ответьте как можно скорее и при необходимости свяжитесь с сотрудником.'
+          : q.addressee ? `Сотрудник написал из сообщения плана — ${(ADDRESSEE[q.addressee]?.to || '').toLowerCase()}${q.addressee === 'mentor' && q.mentor ? ` (${q.mentor})` : ''}. Передайте вопрос адресату или ответьте сами.`
+          : 'В документах ответа не нашлось.'}
         {q.resolved_question && q.resolved_question !== q.question && <div style={{ marginTop: 6 }}><Link2 aria-hidden style={{ width: 14, height: 14, verticalAlign: '-2px' }} /> Понято как: «{q.resolved_question}»</div>}
         <div style={{ marginTop: 6 }} className="nm-muted">
           Задан {ruDateTime(q.created_at)}{q.contact ? ` · ${q.contact}` : ''}{q.mentor ? ` · наставник: ${q.mentor}` : ''}

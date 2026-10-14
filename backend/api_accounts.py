@@ -175,6 +175,25 @@ def api_my_questions(user: dict = Depends(require_setup_done)):
     return {"questions": questions.list_for_user(user["id"])}
 
 
+class DirectQuestion(BaseModel):
+    text: str = Field(max_length=2000)
+    to: str = Field(max_length=16)
+
+
+@router.post("/api/my/questions", dependencies=logged_in)
+def api_ask_person(body: DirectQuestion, request: Request, user: dict = Depends(require_setup_done)):
+    """Кнопка «Написать наставнику / руководителю / в отдел кадров» у сообщения плана: вопрос
+    встаёт в очередь администратору с адресатом, ответ придёт в «Мои вопросы»."""
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Вопрос не может быть пустым")
+    if body.to not in questions.ADDRESSEES:
+        raise HTTPException(status_code=400, detail="Неизвестный адресат")
+    security.limit(request, "ask-person", 10, 60, key=user["id"])
+    entry = questions.record(user, text, None, questions.REASON_DIRECT, addressee=body.to)
+    return {"question": {k: entry[k] for k in ("id", "created_at", "question", "status", "addressee")}}
+
+
 @router.get("/api/my/messages", dependencies=logged_in)
 def api_my_messages(user: dict = Depends(require_setup_done)):
     """Инбокс: сообщения плана, которые уже наступили по расписанию и доставлены."""

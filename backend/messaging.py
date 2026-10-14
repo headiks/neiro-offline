@@ -45,7 +45,7 @@ def _localize(iso_naive: str, tzname: str) -> datetime:
     return dt.replace(tzinfo=tz)
 
 
-def _message_row(employee_id: str, plan_id, msg: dict, tzname: str):
+def _message_row(employee_id: str, plan_id, msg: dict, tzname: str, seq: int = 0):
     """Готовит поля строки scheduled_messages из позиции расписания. Чистая (тестируется).
     None — если нет даты или сообщение ещё не сгенерировано: пустой «Этап — Подэтап» без
     текста сотруднику не шлём; появится текст — refresh_plan досоздаст строку."""
@@ -73,6 +73,7 @@ def _message_row(employee_id: str, plan_id, msg: dict, tzname: str):
         # приложении и кабинете. Без неё — просто текст (body).
         "payload": content.get("converted"),
         "send_at": _localize(send_iso, tzname),
+        "seq": seq,
     }
 
 
@@ -87,8 +88,8 @@ def materialize_employee(employee: dict, force: bool = False) -> int:
 
     tzname = schedule.get("timezone") or DEFAULT_TIMEZONE
     plan_id = schedule.get("plan_id")
-    rows = [r for r in (_message_row(employee["id"], plan_id, m, tzname)
-                        for m in schedule.get("messages", [])) if r]
+    rows = [r for r in (_message_row(employee["id"], plan_id, m, tzname, seq)
+                        for seq, m in enumerate(schedule.get("messages", []))) if r]
 
     if force:
         # Только строки плана: отложенные тестовые/служебные уведомления (plan_id NULL) не трогаем.
@@ -100,17 +101,20 @@ def materialize_employee(employee: dict, force: bool = False) -> int:
         # Обновляем только ещё не доставленные строки — историю не переписываем.
         db.execute(
             "INSERT INTO scheduled_messages "
-            "(id, employee_id, plan_id, message_id, stage_id, substage_id, title, body, kind, payload, send_at) "
+            "(id, employee_id, plan_id, message_id, stage_id, substage_id, title, body, kind, payload, send_at, seq) "
             "VALUES (%(id)s, %(employee_id)s, %(plan_id)s, %(message_id)s, %(stage_id)s, "
-            "%(substage_id)s, %(title)s, %(body)s, %(kind)s, %(payload)s, %(send_at)s) "
+            "%(substage_id)s, %(title)s, %(body)s, %(kind)s, %(payload)s, %(send_at)s, %(seq)s) "
             "ON CONFLICT (id) DO UPDATE SET "
-            "  title = EXCLUDED.title, body = EXCLUDED.body, send_at = EXCLUDED.send_at, "
+            "  title = EXCLUDED.title, body = EXCLUDED.body, send_at = EXCLUDED.send_at, seq = EXCLUDED.seq, "
             "  kind = EXCLUDED.kind, payload = EXCLUDED.payload, "
             "  plan_id = EXCLUDED.plan_id, stage_id = EXCLUDED.stage_id, "
             "  substage_id = EXCLUDED.substage_id, updated_at = now() "
             "WHERE scheduled_messages.status = 'pending'",
             {**r, "payload": Json(r["payload"]) if r.get("payload") else None},
         )
+        # Уже доставленные до появления seq строки — только позиция, текст не трогаем.
+        db.execute("UPDATE scheduled_messages SET seq = %s WHERE id = %s AND seq IS NULL",
+                   (r["seq"], r["id"]))
     return len(rows)
 
 
@@ -232,9 +236,9 @@ def push_body(kind: str, body: str) -> str:
 def inbox(employee_id: str, limit: int = 200) -> list:
     return db.query(
         "SELECT id, message_id, title, body, kind, payload, answers, send_at, status, "
-        "delivered_at, read_at, stage_id, substage_id FROM scheduled_messages "
+        "delivered_at, read_at, stage_id, substage_id, seq FROM scheduled_messages "
         "WHERE employee_id = %s AND status IN ('delivered', 'read') "
-        "ORDER BY send_at DESC LIMIT %s",
+        "ORDER BY send_at DESC, seq DESC NULLS LAST LIMIT %s",
         (employee_id, max(1, min(int(limit), 500))),
     )
 

@@ -27,3 +27,39 @@ def test_every_catalog_kind_converts():
         assert out.get("type") == fmt, (kind, out)
         body = {"quiz": "questions", "survey": "questions", "checklist": "items", "message": "text"}[fmt]
         assert out[body], (kind, out)
+
+
+def test_tidy_table_enums_paragraphs_and_terms():
+    """Тест-драйв: таблица из палочек, перечень в строку, «простыня» и жаргон — чиним без модели."""
+    t = msgconvert.tidy("Действуйте так:\n| Ситуация | К кому |\n|--|--|\n| Травма | Медпункт |\n| ЧП | 112 |")
+    assert "|" not in t and "• Травма — Медпункт" in t and "Ситуация" not in t
+    t = msgconvert.tidy("Порядок: 1) остановите станок; 2) позовите мастера; 3) сообщите руководителю.")
+    assert t.split("\n") == ["Порядок:", "1) остановите станок;", "2) позовите мастера;", "3) сообщите руководителю."]
+    long = " ".join(f"Предложение номер {i} про охрану труда на участке и порядок работы." for i in range(12))
+    assert "\n\n" in msgconvert.tidy(long)
+    t = msgconvert.tidy("Сверьтесь со штаткой и с должностной. Изучите должностную, уточните у HR. "
+                        "Три недели практики под наставником.")
+    assert t == ("Сверьтесь со штатным расписанием и с должностной инструкцией. Изучите должностную "
+                 "инструкцию, уточните в отделе кадров. Три недели практики под руководством наставника.")
+    assert msgconvert.tidy("Должностная инструкция и должностной оклад") == "Должностная инструкция и должностной оклад"
+    assert msgconvert.tidy(t) == t                                     # идемпотентно
+
+
+def test_contacts_only_when_asked_to_reach_out():
+    roles = lambda s: [c["role"] for c in msgconvert.contacts(s)]
+    assert roles("Если что-то неясно — напишите наставнику.") == ["mentor"]
+    assert roles("Три недели практики под руководством наставника.") == []
+    assert roles("Вопросы по комплекту — к руководителю. Уточните в отделе кадров.") == ["manager", "hr"]
+    assert roles("Сообщите руководителю и обратитесь в отдел кадров.") == ["manager", "hr"]
+    out = msgconvert.convert({"body": "Сомневаетесь — обратитесь к наставнику."}, "message")
+    assert out["contacts"] == [{"role": "mentor", "label": "Написать наставнику"}]
+
+
+def test_survey_options_buttons():
+    out = msgconvert.convert({"questions": [
+        {"text": "Хотите задать вопрос?", "type": "single",
+         "options": ["Нет, всё понятно", "Написать наставнику", "Написать в отдел кадров"]},
+        {"text": "Пропуск получен?", "type": "bool"}]}, "survey")
+    q1, q2 = out["questions"]
+    assert [o.get("contact") for o in q1["options"]] == [None, "mentor", "hr"]
+    assert [o["text"] for o in q2["options"]] == ["Да", "Нет"]

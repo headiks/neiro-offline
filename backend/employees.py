@@ -15,6 +15,7 @@
 новичков — меняются только даты и плейсхолдеры.
 """
 
+import re
 import time
 from datetime import datetime
 from typing import Optional
@@ -32,6 +33,41 @@ def first_name(full_name: str) -> str:
     return parts[0] if parts else "коллега"
 
 
+# Плейсхолдер человека -> (поле сотрудника, роль по падежам: им., род., дат., вин., твор., предл.).
+_PERSON = {
+    "[ФИО наставника]": ("mentor", ("наставник", "наставника", "наставнику", "наставника", "наставником", "наставнике")),
+    "[ФИО руководителя]": ("manager", ("руководитель", "руководителя", "руководителю", "руководителя",
+                                       "руководителем", "руководителе")),
+}
+# Падеж роли по слову перед плейсхолдером: «напишите [ФИО наставника]» -> «напишите наставнику (…)».
+_CASE_BY_PREV = (
+    (re.compile(r"(?:\bк|напишите|написать|позвоните|позвонить|сообщите|сообщить|скажите|сказать|"
+                r"передайте|передать|пишите|звоните)$"), 2),
+    (re.compile(r"(?:\bу|\bот|\bдля|\bбез|\bдо|\bнет)$"), 1),
+    (re.compile(r"(?:позовите|позвать|спросите|спросить|попросите|попросить|найдите|предупредите|"
+                r"предупредить|\bчерез|\bна)$"), 3),
+    (re.compile(r"(?:\bс|\bсо)$"), 4),
+    (re.compile(r"(?:\bо|\bоб|\bпри)$"), 5),
+)
+
+
+def _person(text: str, placeholder: str, value: str, forms: tuple) -> str:
+    """В поле наставника/руководителя бывает должность («Главный администратор»), а не ФИО, и её
+    не просклонять. Поэтому роль ставим сами в нужном падеже, а значение — в скобках после неё:
+    «начните с наставника (Главный администратор)». Значения нет — остаётся одна роль."""
+    tail = f" ({value})" if value else ""
+    roles = "|".join(sorted(set(forms), key=len, reverse=True))
+    # «наставнику ([ФИО наставника])», «наставника [ФИО наставника]» — роль уже есть
+    text = re.sub(rf"(?i)\b({roles})\s*\(?\s*{re.escape(placeholder)}\s*\)?", lambda m: m.group(1) + tail, text)
+
+    def bare(m):
+        prev = m.string[max(0, m.start() - 14):m.start()].rstrip().lower()
+        case = next((c for rx, c in _CASE_BY_PREV if rx.search(prev)), 0)
+        return forms[case] + tail
+
+    return re.sub(re.escape(placeholder), bare, text)
+
+
 def substitute(text: str, employee: dict) -> str:
     """Подстановка плейсхолдеров, которые генератор оставляет в тексте сообщения."""
     if not text:
@@ -42,14 +78,14 @@ def substitute(text: str, employee: dict) -> str:
         "[Должность]": employee.get("position", ""),
     }
     if employee.get("mentor"):
-        replacements["[ФИО наставника]"] = employee["mentor"]
         replacements["[ФИО, тел.]"] = employee["mentor"]
-    if employee.get("manager"):
-        replacements["[ФИО руководителя]"] = employee["manager"]
 
     for placeholder, value in replacements.items():
         if value:
             text = text.replace(placeholder, value)
+    for placeholder, (field, forms) in _PERSON.items():
+        if placeholder in text:
+            text = _person(text, placeholder, (employee.get(field) or "").strip(), forms)
     return text
 
 

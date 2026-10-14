@@ -9,6 +9,13 @@ export const QUESTION_STATUS: Record<string, StatusView> = {
   sos: { tone: "danger", label: "ЧС" },
 };
 
+/** Кому адресован вопрос, написанный кнопкой у сообщения (questions.ADDRESSEES). */
+export const ADDRESSEE: Record<string, { to: string; title: string }> = {
+  mentor: { to: "Наставнику", title: "Вопрос наставнику" },
+  manager: { to: "Руководителю", title: "Вопрос руководителю" },
+  hr: { to: "В отдел кадров", title: "Вопрос в отдел кадров" },
+};
+
 export const ROLE: Record<string, StatusView> = {
   owner: { tone: "accent", label: "Суперадмин" },
   admin: { tone: "ok", label: "Администратор" },

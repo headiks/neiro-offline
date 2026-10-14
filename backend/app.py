@@ -101,6 +101,13 @@ def _migrate_legacy():
             print(f"Миграция: перенесено/исправлено {what}: {n}")
 
 
+def _rerender_texts():
+    """Правила сборки текста (msgconvert.tidy, кнопки связи) — и для уже сохранённых сообщений."""
+    n = planner.rerender_saved_texts()
+    if n:
+        print(f"Сообщения плана пересобраны по текущим правилам: {n}")
+
+
 def _announce_owner():
     initial = users.ensure_owner()
     if initial:
@@ -160,6 +167,7 @@ async def lifespan(app: FastAPI):
         _step("пайплайн разметки docpipe", _init_docpipe)
         _step("индекс фрагментов документов", docindex.init)   # после таблицы sections
         _step("миграция старых данных", _migrate_legacy)
+        _step("пересборка текстов сообщений", _rerender_texts)
         _announce_owner()
         _step("очистка осиротевших меток docpipe", _prune_orphans)
         _requeue_without_redis()

@@ -201,6 +201,9 @@ SCHEMA_STATEMENTS = (
     "ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'message'",
     "ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS payload JSONB",
     "ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS answers JSONB",
+    # Позиция в плане (этап -> подэтап): сообщения одного времени (пачка за день, догонка
+    # после позднего назначения) показываются строго в порядке этапов, а не вперемешку.
+    "ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS seq INT",
     # Push-токены устройств сотрудника (Expo Push): одно устройство = один токен.
     # По ним шлём пуш при доставке сообщения плана. token — PK (при переустановке
     # приложения приходит новый; старый протухнет и будет вычищен по ответу Expo).
