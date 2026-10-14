@@ -39,3 +39,16 @@ def test_canned_replies_do_not_mention_cabinet_or_documents():
     for text in (api_chat.ESCALATE_REPLY, api_chat.NO_ANSWER_REPLY):
         low = text.lower()
         assert "кабинет" not in low and "регламент" not in low and "документ" not in low
+
+
+def test_cached_answer_without_route_passes_response_model(monkeypatch):
+    """Готовый ответ faq/section/human несёт в meta только sources — /ask не должен падать."""
+    import qacache
+    import rag
+    monkeypatch.setattr(rag.deepseek, "offline", lambda: False)
+    monkeypatch.setattr(rag, "resolve_question", lambda q, h: {"standalone_question": q, "context_used": False})
+    monkeypatch.setattr(qacache, "get", lambda q, p: {"answer": "Ответ специалиста.", "qa_id": 1,
+                                                      "qa_source": "human"})
+    r = rag.handle_question("Где получить пропуск?")
+    assert r["route"] == "rag" and r["classification"]["cached"] is True
+    api_chat.QuestionResponse(**{**r, "session_id": "s1"})   # не поднимает ValidationError

@@ -580,10 +580,14 @@ def handle_question(question, history=None, current_stage_ids=None, position=Non
         cached = None
     if cached:
         log("CACHE", "Ответ из кэша частых вопросов")
+        # route/classification обязательны в ответе /ask, а в meta готовых ответов faq/section/
+        # human их нет (у локальной модели — только route): без дефолтов /ask падал на ValidationError.
+        route = cached.get("route") or "rag"
         return {"question": question,
                 "resolved_question": effective_question if context_used else None,
                 "context_used": context_used, "candidates": [], "top_fragments": [],
                 "elapsed_time": time.time() - total_start, "error": None, "cached": True,
+                "route": route, "classification": {"route": route, "cached": True},
                 **cached}
 
     if offline:
