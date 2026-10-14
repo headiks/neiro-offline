@@ -147,12 +147,14 @@ def replace_chunks(section_id: str, chunks: list, embedding_version: str) -> lis
             subs = ch.get("substages") or []
             stages = list(ch.get("stages") or [])
             is_general = bool(ch.get("is_general"))
+            meta = ch.get("meta")
         else:
-            text, subs, stages, is_general = ch, [], [], False
+            text, subs, stages, is_general, meta = ch, [], [], False, None
         db.execute(
             "INSERT INTO chunks (id, section_id, seq, text, embedding_version, "
-            "substages, stages, is_general) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (cid, section_id, seq, text, embedding_version, Json(subs), stages, is_general),
+            "substages, stages, is_general, meta) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (cid, section_id, seq, text, embedding_version, Json(subs), stages, is_general,
+             Json(meta) if meta is not None else None),
         )
         ids.append(cid)
     return ids

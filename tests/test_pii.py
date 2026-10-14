@@ -75,3 +75,52 @@ def test_unmask_json_safe_and_tolerant():
     assert m.unmask("Обратитесь к ФИО_1.") == "Обратитесь к Иванов Иван Иванович."
     # чужая метка (её не было в запросе) остаётся как есть
     assert m.unmask("[ТЕЛ_7]") == "[ТЕЛ_7]"
+
+
+def test_requisites_by_checksum_and_inn_kpp_pair():
+    """ИНН/ОГРН без ключевого слова ловим по контрольной сумме; пара ИНН/КПП — целиком."""
+    m = pii.Masker()
+    masked = m.mask("Контрагент 7707083893/773601001, ОГРН 1027700132195, в договоре указан 7707083893.")
+    for secret in ("7707083893", "773601001", "1027700132195"):
+        assert secret not in masked, masked
+    assert m.unmask(masked).startswith("Контрагент 7707083893/773601001")
+    assert not pii._inn_ok("1234567890")
+    assert pii.Masker().mask("Номер заказа 1234567890 от 01.02.2026.") == "Номер заказа 1234567890 от 01.02.2026."
+
+
+def test_org_names_from_fns_dictionary(monkeypatch):
+    monkeypatch.setattr(pii, "_ORG_SET", {"ромашка", "альфа строй"})
+    for text, secret in (("Договор с «Ромашка» продлён.", "Ромашка"),
+                         ("Материалы везёт поставщик Альфа Строй.", "Альфа"),
+                         ("Альфа Строй выиграла тендер.", "Альфа")):
+        masked = pii.Masker().mask(text)
+        assert secret not in masked and "[ОРГ_1]" in masked, (text, masked)
+    assert pii.Masker().mask("Ромашка растёт у проходной.") == "Ромашка растёт у проходной."
+
+
+def test_custom_trade_secret_terms(monkeypatch, tmp_path):
+    f = tmp_path / "pii_terms.txt"
+    f.write_text("# коммерческая тайна\nПроект Сокол\nТюменьНефтеМаш\n", encoding="utf-8")
+    monkeypatch.setattr(pii, "TERMS_PATH", f)
+    monkeypatch.setattr(pii, "_TERMS", (None, None))
+    m = pii.Masker()
+    text = "Работы по теме «проект сокол» ведёт тюменьнефтемаш."      # регистр не важен, форма — дословно
+    masked = m.mask(text)
+    assert "сокол" not in masked.lower() and "нефтемаш" not in masked.lower() and "[КТ_2]" in masked, masked
+    assert m.unmask(masked) == text
+
+
+def test_fns_import_extracts_core_names_by_region():
+    import io
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import import_org_names as imp
+    xml = ('<?xml version="1.0" encoding="utf-8"?><Файл>'
+           '<Документ><ОргВклМСП НаимОрг="ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ &quot;РОМАШКА&quot;" '
+           'НаимОргСокр="ООО &quot;РОМАШКА&quot;" ИННЮЛ="7203000000"/></Документ>'
+           '<Документ><ОргВклМСП НаимОрг="АКЦИОНЕРНОЕ ОБЩЕСТВО &quot;АЛЬФА СТРОЙ&quot;" ИННЮЛ="7701000000"/></Документ>'
+           '</Файл>').encode("utf-8")
+    assert set(imp.names_from_xml(io.BytesIO(xml), {"72"})) == {"ромашка"}
+    assert set(imp.names_from_xml(io.BytesIO(xml), set())) == {"ромашка", "альфа строй"}
+    assert imp.core_name("ООО СТРОЙМОНТАЖ") == "строймонтаж"

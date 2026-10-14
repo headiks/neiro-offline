@@ -11,12 +11,17 @@ pii.py — обезличивание персональных данных пе
   телефоны     +7/8 и 10 цифр в любой группировке (мобильные и городские с кодом 3–5 цифр),
                городские «(3452) 56-78-90»;
   email;
-  реквизиты    ИНН/КПП/ОГРН/БИК/ОКПО — число после ключевого слова;
+  реквизиты    ИНН/КПП/ОГРН/БИК/ОКПО — число после ключевого слова; ИНН и ОГРН(ИП) и без
+               слова — по контрольной сумме; пара «ИНН/КПП» через дробь;
   СНИЛС        XXX-XXX-XXX XX;
   счета        20 цифр (р/с, к/с); банковские карты — 16 цифр;
   паспорт      «паспорт 45 12 123456», «серия 4512 номер 123456»;
   дата рождения, домашний адрес (с квартирой), табельный номер;
-  организации  ООО/АО/ПАО/ЗАО/ОАО/ИП/ФГУП/МУП «Название» и без кавычек.
+  организации  ООО/АО/ПАО/ЗАО/ОАО/ИП/ФГУП/МУП «Название» и без кавычек; названия из выгрузки
+               ФНС (data/org_dict, scripts/import_org_names.py) — в кавычках, после «компания»,
+               «поставщик»… или из 2–4 слов с заглавной;
+  коммерческая тайна  свой список терминов заказчика (data/secrets/pii_terms.txt): название
+               компании, бренды, партнёры, коды проектов — маска [КТ_n].
 
 ponytail: regex + словарь ловят типовые форматы кадровых документов; одиночное имя без
 фамилии («сообщит Ирина») и ФИО латиницей пройдут. Нужна полнота выше — подключить NER
@@ -27,8 +32,13 @@ import os
 import re
 from pathlib import Path
 
-_NAME_DIR = Path(__file__).resolve().parents[1] / "data" / "name_dict"
+_DATA = Path(__file__).resolve().parents[1] / "data"
+_NAME_DIR = _DATA / "name_dict"
 _NAME_SET = None
+_ORG_DIR = _DATA / "org_dict"
+_ORG_SET = None
+TERMS_PATH = Path(os.environ.get("NEIROMASTER_PII_TERMS", str(_DATA / "secrets" / "pii_terms.txt")))
+_TERMS = (None, None)                     # (mtime файла, regex)
 
 
 def _norm(word: str) -> str:
@@ -48,6 +58,40 @@ def name_set() -> set:
                 pass
         _NAME_SET = s
     return _NAME_SET
+
+
+def norm_org(name: str) -> str:
+    """Название организации для сверки со словарём: регистр, ё, кавычки и пробелы не важны."""
+    return " ".join(re.sub(r"[«»\"“”„']", " ", name).lower().replace("ё", "е").split())
+
+
+def org_set() -> set:
+    """Названия организаций (по одному в строке) из data/org_dict/*.txt — выгрузка ФНС
+    (scripts/import_org_names.py) и/или свой список контрагентов. Нет файлов — пусто."""
+    global _ORG_SET
+    if _ORG_SET is None:
+        s = set()
+        for fn in sorted(_ORG_DIR.glob("*.txt")) if _ORG_DIR.is_dir() else []:
+            with open(fn, encoding="utf-8") as f:
+                s.update(n for n in (norm_org(ln) for ln in f) if len(n) >= 3)
+        _ORG_SET = s
+    return _ORG_SET
+
+
+def _terms_rx():
+    """Свой список коммерческой тайны заказчика: термин в строке, «#» — комментарий. Файл
+    перечитывается при изменении — правка применяется без перезапуска."""
+    global _TERMS
+    try:
+        mtime = TERMS_PATH.stat().st_mtime
+    except OSError:
+        return None
+    if _TERMS[0] != mtime:
+        with open(TERMS_PATH, encoding="utf-8") as f:
+            terms = {ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")}
+        alts = "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True))
+        _TERMS = (mtime, re.compile(rf"(?i)(?<!\w)(?:{alts})(?!\w)") if alts else None)
+    return _TERMS[1]
 
 
 def enabled() -> bool:
@@ -81,15 +125,41 @@ def _name_hit(word: str) -> int:
     return 0
 
 
+def _inn_ok(d: str) -> bool:
+    """Контрольные цифры ИНН (10 цифр — юрлицо, 12 — физлицо/ИП)."""
+    n = [int(c) for c in d]
+
+    def chk(w):
+        return sum(a * b for a, b in zip(w, n)) % 11 % 10
+    if len(n) == 10:
+        return chk((2, 4, 10, 3, 5, 9, 4, 6, 8)) == n[9]
+    if len(n) == 12:
+        return chk((7, 2, 4, 10, 3, 5, 9, 4, 6, 8)) == n[10] and chk((3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8)) == n[11]
+    return False
+
+
+def _ogrn_ok(d: str) -> bool:
+    """Контрольная цифра ОГРН (13 цифр) и ОГРНИП (15 цифр)."""
+    if len(d) == 13:
+        return int(d[:12]) % 11 % 10 == int(d[12])
+    if len(d) == 15:
+        return int(d[:14]) % 13 % 10 == int(d[14])
+    return False
+
+
 _W = r"[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?"
 _I = r"[А-ЯЁ]\.\s?"
 _D = r"[\s\-()]*"
-# (метка, regex, номер группы с данными). Порядок важен: длинные/специфичные — раньше.
+# (метка, regex, номер группы с данными[, проверка значения]). Порядок важен: длинные/специфичные — раньше.
 _PATTERNS = [
     ("EMAIL", re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), 0),
     ("ОРГ", re.compile(r"\b(?:ООО|АО|ПАО|ЗАО|ОАО|ИП|НКО|ФГУП|МУП|ГУП)\s*[«\"“][^»\"”\n]{1,80}[»\"”]"), 0),
     ("ОРГ", re.compile(r"\b(?:ООО|АО|ПАО|ЗАО|ОАО|НКО|ФГУП|МУП|ГУП)\s+[А-ЯЁA-Z][\w-]*(?:\s+[А-ЯЁA-Z][\w-]*){0,2}"), 0),
+    ("РЕКВ", re.compile(r"(?<!\d)\d{10}(?:\d{2})?\s*/\s*\d{4}[\dA-Z]{2}\d{3}(?![\dA-Z])"), 0),   # ИНН/КПП
     ("РЕКВ", re.compile(r"(?i)\b(?:ИНН|КПП|ОГРНИП|ОГРН|БИК|ОКПО)\s*[:№]?\s*(\d{8,15})\b"), 1),
+    # Без ключевого слова — только с верной контрольной суммой (иначе любой номер стал бы ИНН).
+    ("РЕКВ", re.compile(r"(?<![\d\w-])\d{10}(?:\d{2})?(?![\d\w-])"), 0, _inn_ok),
+    ("РЕКВ", re.compile(r"(?<![\d\w-])\d{13}(?:\d{2})?(?![\d\w-])"), 0, _ogrn_ok),
     ("СЧЁТ", re.compile(r"(?<!\d)\d{20}(?!\d)"), 0),
     ("КАРТА", re.compile(r"(?<![\d-])\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}(?![\d-])"), 0),
     ("СНИЛС", re.compile(r"(?<!\d)\d{3}-\d{3}-\d{3}[ -]\d{2}(?!\d)"), 0),
@@ -108,9 +178,16 @@ _PATTERNS = [
     ("ФИО", re.compile(rf"\b{_W}\s{_I}{_I}(?!\w)|(?<!\w){_I}{_I}{_W}\b"), 0),
 ]
 _FIO_RUN = re.compile(rf"\b{_W}(?:\s{_W}){{1,3}}\b")
+# Организации по словарю ФНС: в кавычках; после слова-контекста; 2–4 слова с заглавной.
+_ORG_QUOTED = re.compile(r"[«\"“]([^»\"”\n]{2,80})[»\"”]")
+_ORG_WORD = r"[А-ЯЁA-Z][\w-]*"
+_ORG_CONTEXT = re.compile(r"(?i:компани\w*|организаци\w*|фирм\w*|поставщик\w*|подрядчик\w*|"
+                          r"контрагент\w*|завод\w*|предприяти\w*|банк\w*|холдинг\w*)\s+"
+                          rf"({_ORG_WORD}(?:\s{_ORG_WORD}){{0,3}})")
+_ORG_RUN = re.compile(rf"(?<![\w-]){_ORG_WORD}(?:\s{_ORG_WORD}){{1,3}}(?![\w-])")
 _SURNAME_END = re.compile(r"(?:ов|ев|ёв|ин|ын|ский|цкий|ская|цкая|ова|ева|ина|ына|ко|ук|юк|ян|дзе|швили|ых|их)"
                           r"(?:а|у|ым|ом|е|ой|ому|ого|им)?$")
-_LABELS = ("EMAIL", "ОРГ", "РЕКВ", "СЧЁТ", "КАРТА", "СНИЛС", "ПАСПОРТ", "ДАТА", "АДРЕС", "ТАБ", "ТЕЛ", "ФИО")
+_LABELS = ("EMAIL", "ОРГ", "РЕКВ", "СЧЁТ", "КАРТА", "СНИЛС", "ПАСПОРТ", "ДАТА", "АДРЕС", "ТАБ", "ТЕЛ", "ФИО", "КТ")
 _LABEL_RX = "|".join(_LABELS)
 # Метки в ответе модели. Модель иногда слегка их искажает («[ФИО 1]», «ФИО_1») — такие тоже
 # возвращаем, иначе сотрудник получил бы сообщение с техническими метками.
@@ -130,17 +207,28 @@ def _is_person(words: list) -> bool:
 
 
 def _find_spans(text: str) -> list:
-    """[(start, end, метка)] без пересечений: сначала форматы, потом ФИО по словарю."""
+    """[(start, end, метка)] без пересечений: свой список коммерческой тайны, форматы,
+    организации по словарю ФНС, потом ФИО по словарю."""
     spans = []
 
     def free(a, b):
         return all(b <= s or a >= e for s, e, _ in spans)
 
-    for label, rx, grp in _PATTERNS:
+    terms = _terms_rx()
+    for m in terms.finditer(text) if terms else ():
+        if free(*m.span()):
+            spans.append((*m.span(), "КТ"))
+    for label, rx, grp, *check in _PATTERNS:
         for m in rx.finditer(text):
             a, b = m.span(grp)
-            if a < b and free(a, b):
+            if a < b and free(a, b) and (not check or check[0](m.group(grp))):
                 spans.append((a, b, label))
+    orgs = org_set()
+    for rx, grp in ((_ORG_QUOTED, 0), (_ORG_CONTEXT, 1), (_ORG_RUN, 0)) if orgs else ():
+        for m in rx.finditer(text):
+            a, b = m.span(grp)
+            if norm_org(m.group(1 if rx is _ORG_QUOTED else grp)) in orgs and free(a, b):
+                spans.append((a, b, "ОРГ"))
     for m in _FIO_RUN.finditer(text):
         words, a = m.group(0).split(), m.start()
         # «Звонить Сидоров Пётр Петрович»: слово начала фразы не имя — отрезаем его,

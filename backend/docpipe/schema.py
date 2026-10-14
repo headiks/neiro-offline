@@ -84,6 +84,9 @@ SCHEMA_STATEMENTS = (
     "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS substages JSONB NOT NULL DEFAULT '[]'",
     "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS stages TEXT[] NOT NULL DEFAULT '{}'",
     "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS is_general BOOLEAN NOT NULL DEFAULT FALSE",
+    # Гибридная разметка: голоса алгоритмов границы, ключевые слова, кандидаты-подэтапы и кто
+    # выбрал итог (lexical / local / deepseek) — полная выгрузка для проверки и фильтрации.
+    "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS meta JSONB",
     "CREATE INDEX IF NOT EXISTS idx_chunks_section ON chunks(section_id)",
     "CREATE INDEX IF NOT EXISTS idx_chunks_substages ON chunks USING GIN (substages)",
     # Очередь разметки: документ = задача, возобновляется с последней размеченной секции.

@@ -1,12 +1,22 @@
 """
-Оркестрация пайплайна: docling -> префильтр -> проход 1 (карточка) -> проход 2 (разметка
-секций LLM) -> запись меток в PostgreSQL. Векторов/эмбеддингов нет. Плюс асинхронная
-очередь разметки с retry/backoff и возобновлением с последней размеченной секции.
+Оркестрация пайплайна: docling -> префильтр -> разметка секций -> запись меток в PostgreSQL.
+Векторов/эмбеддингов нет. Плюс асинхронная очередь разметки с retry/backoff и возобновлением
+с последней размеченной секции.
+
+Два режима разметки (NEIROMASTER_DOCPIPE_MODE):
+  hybrid (по умолчанию) — основа без ИИ (lexical.py): фрагменты по голосованию TextTiling/C99/
+         разметки текста, ключевые слова TF-IDF, кандидаты-подэтапы по сходству с профилем
+         подэтапа. Явный кандидат принимается сразу; спорный выбирает модель ТОЛЬКО из кандидатов
+         (NEIROMASTER_DOCPIPE_REFINE: local — локальная модель, текст не покидает сервер;
+         deepseek — обезличенный фрагмент; off — без модели). Модель недоступна — берём лучшего
+         кандидата по сходству: разбор не зависит от ИИ.
+  llm    — прежний режим: DeepSeek делит секцию на чанки и размечает их сам (проход 1 + 2).
 
 Публичный API: ingest, reindex, relabel_candidates, retrieve, enqueue, worker управление.
 """
 
 import os
+import json
 import time
 import queue
 import hashlib
@@ -14,7 +24,16 @@ import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from . import core, llm, store, professions
+from . import core, lexical, llm, store, professions
+
+MODE = os.environ.get("NEIROMASTER_DOCPIPE_MODE", "hybrid").strip().lower()       # hybrid | llm
+REFINE = os.environ.get("NEIROMASTER_DOCPIPE_REFINE", "local").strip().lower()    # local | deepseek | off
+HYBRID_VERSION = "hybrid-1"
+# Явный кандидат — без модели: сходство не ниже CLEAR_SIM и отрыв от второго не меньше CLEAR_MARGIN.
+CLEAR_SIM = float(os.environ.get("NEIROMASTER_DOCPIPE_CLEAR_SIM", "0.18"))
+CLEAR_MARGIN = float(os.environ.get("NEIROMASTER_DOCPIPE_CLEAR_MARGIN", "0.05"))
+# Модель недоступна или выключена — лучший кандидат принимается, если сходство не ниже этого.
+ACCEPT_SIM = float(os.environ.get("NEIROMASTER_DOCPIPE_ACCEPT_SIM", "0.10"))
 
 # Векторов больше нет (Qdrant удалён): метка версии эмбеддинга в чанках — заглушка,
 # поле сохраняется для совместимости схемы store.
@@ -126,6 +145,100 @@ def _label_section(sec: dict, repeated: set, card: dict, structure: dict, positi
     return {"section": section, "chunks": chunk_labels}
 
 
+# ---------- Гибридная разметка: основа без ИИ + выбор моделью из кандидатов ----------
+REFINE_SYSTEM = """Ты уточняешь разметку фрагмента внутреннего документа компании. Поисковый алгоритм
+уже подобрал варианты — подэтапы плана адаптации нового сотрудника, к которым фрагмент может
+относиться. Выбери те, к теме которых фрагмент ПРЯМО относится: обычно один, максимум три.
+Если ни один не подходит — пустой список. Бери id только из вариантов.
+Верни JSON: {"pick": ["id", ...]}"""
+_refine_off_until = 0.0
+
+
+def _refine(text: str, cands: list, matcher) -> "list | None":
+    """id подэтапов, выбранные моделью из кандидатов; None — модель выключена/недоступна."""
+    global _refine_off_until
+    if REFINE not in ("local", "deepseek") or time.time() < _refine_off_until:
+        return None
+    import deepseek
+    brief = {p["id"]: p.get("brief") or "" for p in matcher.profiles}
+    options = "\n".join(f"- {c['id']}: {c['title']}. {brief.get(c['id'], '')}" for c in cands)
+    try:
+        raw = deepseek.chat(REFINE_SYSTEM, f"Фрагмент:\n{text[:1500]}\n\nВарианты:\n{options}",
+                            json_mode=True, max_tokens=80, timeout=180,
+                            target="local" if REFINE == "local" else "deepseek")
+    except Exception as e:
+        print(f"[docpipe] уточнение моделью недоступно ({e}) — 10 минут разметка без модели")
+        _refine_off_until = time.time() + 600
+        return None
+    try:
+        picks = json.loads(raw).get("pick") or []
+    except (ValueError, AttributeError):
+        return None
+    ids = {c["id"] for c in cands}
+    return [p for p in picks if p in ids]
+
+
+def _choose(text: str, cands: list, matcher) -> tuple:
+    """(подэтапы [{id, confidence}], кто выбрал). Явный лидер — сразу; спорные — модель."""
+    if not cands:
+        return [], "lexical"
+    top = cands[0]
+    second = cands[1]["score"] if len(cands) > 1 else 0.0
+    if top["score"] >= CLEAR_SIM and top["score"] - second >= CLEAR_MARGIN:
+        return [{"id": top["id"], "confidence": top["confidence"]}], "lexical"
+    picks = _refine(text, cands, matcher)
+    if picks is None:
+        if top["score"] < ACCEPT_SIM:
+            return [], "lexical"
+        return [{"id": top["id"], "confidence": top["confidence"]}], "lexical"
+    # Модель подтвердила кандидата — уверенность не ниже 0.6 (порог привязки секции).
+    return [{"id": c["id"], "confidence": max(c["confidence"], 0.6)} for c in cands if c["id"] in picks], REFINE
+
+
+def _hybrid_label(sec: dict, repeated: set, structure: dict, positions: list, matcher) -> dict:
+    """Разметка секции без ИИ в основе: фрагменты (голосование алгоритмов), темы-ключевые слова,
+    кандидаты-подэтапы; модель только выбирает из кандидатов в спорных случаях. Всё, что
+    насчитали алгоритмы, сохраняется в chunks.meta — для полной выгрузки и проверки."""
+    text = sec.get("text") or ""
+    ok, reason = core.prefilter(text)
+    if ok and text.strip() in repeated:
+        ok, reason = False, "running_header"
+    if not ok:
+        junk = {"is_meaningful": False, "reject_reason": reason, "substages": [], "stages": [],
+                "professions": [], "is_general": False, "prof_conf": None, "why": None}
+        return {"section": junk, "chunks": []}
+    chunks = []
+    for piece in lexical.segment(text) or [{"text": text, "votes": {}, "score": None}]:
+        cands = matcher.candidates(piece["text"])
+        general = lexical.is_boilerplate(piece["text"]) and not (cands and cands[0]["score"] >= CLEAR_SIM)
+        subs, by = ([], "lexical") if general else _choose(piece["text"], cands, matcher)
+        chunks.append({"text": piece["text"], "substages": subs,
+                       "stages": core.stages_from_substages([s["id"] for s in subs], structure),
+                       "is_general": general,
+                       "meta": {"votes": piece["votes"], "boundary_score": piece["score"],
+                                "keywords": lexical.keywords(piece["text"], matcher.idf, 8),
+                                "candidates": cands, "picked_by": by}})
+    profs = lexical.professions_in(text, positions)
+    words = [w for w, _ in lexical.keywords(text, matcher.idf, 6)]
+    section = core.section_from_chunks(chunks, structure, {
+        "is_meaningful": True, "professions": profs, "prof_conf": 1.0 if profs else None,
+        "why": ("Ключевые слова: " + ", ".join(words)) if words else None, "reject_reason": None})
+    core.fill_undecided_chunks(chunks, section)
+    return {"section": section, "chunks": chunks}
+
+
+def _catalog_extra() -> dict:
+    """Теги и границы темы («ВКЛЮЧАТЬ»/«НЕ ВКЛЮЧАТЬ») подэтапов каталога — для профилей."""
+    import planner
+    out = {}
+    for st in planner.load_catalog().get("stages") or []:
+        for sub in st.get("substage_templates") or []:
+            f = sub.get("focus") if isinstance(sub.get("focus"), dict) else {}
+            out[f"{st['id']}.{sub['id']}"] = {"tags": sub.get("tags") or [], "include": f.get("include"),
+                                              "exclude": f.get("exclude")}
+    return out
+
+
 def ingest(filepath, filename: str = None, plan_version: str = "current",
            job_id: str = None, force: bool = False, progress_cb=None) -> dict:
     """Полный приём одного документа. Идемпотентно по content_hash (force — переразбор).
@@ -144,8 +257,21 @@ def ingest(filepath, filename: str = None, plan_version: str = "current",
     positions = professions.staffing_positions()
 
     title, toc, head_text, sections, repeated, docling_version = _parse(filepath)
-    card = llm.doc_card(title, toc, head_text)
-    doc_id, _ = store.upsert_document(filename, content_hash, card, docling_version, llm.MODEL)
+    if MODE == "llm":
+        card = llm.doc_card(title, toc, head_text)
+        model, prompt_version = llm.MODEL, llm.PROMPT_VERSION
+
+        def label(sec):
+            return _label_section(sec, repeated, card, structure, positions)
+    else:
+        card = lexical.doc_card(title, toc, head_text, positions)
+        model, prompt_version = f"lexical+{REFINE}", HYBRID_VERSION
+        matcher = lexical.Matcher(lexical.plan_profiles(structure, _catalog_extra()),
+                                  [s.get("text") or "" for s in sections])
+
+        def label(sec):
+            return _hybrid_label(sec, repeated, structure, positions, matcher)
+    doc_id, _ = store.upsert_document(filename, content_hash, card, docling_version, model)
     section_ids = store.replace_sections(doc_id, sections)
 
     if job_id is None:
@@ -163,8 +289,7 @@ def ingest(filepath, filename: str = None, plan_version: str = "current",
     import threading as _th
     _lock = _th.Lock()
     with ThreadPoolExecutor(max_workers=_INGEST_WORKERS) as ex:
-        futs = {ex.submit(_label_section, sec, repeated, card, structure, positions): (seq, sid)
-                for seq, sec, sid in todo}
+        futs = {ex.submit(label, sec): (seq, sid) for seq, sec, sid in todo}
         for fut in as_completed(futs):
             seq, sid = futs[fut]
             try:
@@ -174,7 +299,9 @@ def ingest(filepath, filename: str = None, plan_version: str = "current",
                                       "substages": [], "stages": [], "professions": [],
                                       "is_general": False, "prof_conf": None, "why": None}}
             store.upsert_section_label(sid, result["section"], source="llm", plan_version=plan_version,
-                                       model=llm.MODEL, prompt_version=llm.PROMPT_VERSION)
+                                       model=model, prompt_version=prompt_version)
+            if MODE != "llm" and result.get("chunks"):
+                store.replace_chunks(sid, result["chunks"], EMBED_VERSION)
             with _lock:
                 done += 1
                 store.update_job(job_id, done=done, last_seq=done - 1)
@@ -270,7 +397,8 @@ def document_breakdown(filename: str, plan_version: str = "current") -> dict:
                   for sid in (r.get("stages") or [])]
         chunks = [{"seq": c["seq"], "text": c["text"], "chunk_id": c["id"],
                    "embedding_version": c.get("embedding_version"),
-                   "vector": chunk_vecs.get(c["id"])}
+                   "vector": chunk_vecs.get(c["id"]), "meta": c.get("meta"),
+                   "substages": c.get("substages") or [], "is_general": c.get("is_general")}
                   for c in sec_chunks[r["section_id"]]]
         sections.append({
             "seq": r["seq"], "section_id": r["section_id"],
